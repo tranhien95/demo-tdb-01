@@ -587,6 +587,50 @@
                     <input type="number" id="slPercent" class="control-input" min="0.1" max="10" value="1.5" step="0.1" placeholder="1.5">
                     <div class="control-hint">SL distance từ entry</div>
                 </div>
+
+                <hr style="border: none; border-top: 1px solid #444; margin: 15px 0;">
+
+                <div class="control-group">
+                    <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+                        <input type="checkbox" id="enableMAFilter" style="width: 18px; height: 18px;">
+                        <span>📊 MA Filter (Price > MA50)</span>
+                    </label>
+                    <input type="number" id="maValue" class="control-input" min="10" max="200" value="50" step="10" placeholder="50" disabled>
+                    <div class="control-hint">Chỉ entry khi giá > MA</div>
+                </div>
+
+                <div class="control-group">
+                    <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+                        <input type="checkbox" id="enableVolumeFilter" style="width: 18px; height: 18px;">
+                        <span>📈 Volume Filter (% Average)</span>
+                    </label>
+                    <input type="number" id="volumeThreshold" class="control-input" min="100" max="300" value="120" step="10" placeholder="120" disabled>
+                    <div class="control-hint">Volume phải > X% trung bình</div>
+                </div>
+
+                <div class="control-group">
+                    <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+                        <input type="checkbox" id="enableTrendFilter" style="width: 18px; height: 18px;">
+                        <span>📉 Trend Filter (Trade với trend)</span>
+                    </label>
+                    <input type="number" id="trendMA" class="control-input" min="50" max="500" value="200" step="50" placeholder="200" disabled>
+                    <div class="control-hint">MA để xác định trend (MA200)</div>
+                </div>
+
+                <div class="control-group">
+                    <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+                        <input type="checkbox" id="enableVolatilityFilter" style="width: 18px; height: 18px;">
+                        <span>⚡ Volatility Filter (Min ATR)</span>
+                    </label>
+                    <input type="number" id="minATR" class="control-input" min="1" max="100" value="20" step="1" placeholder="20" disabled>
+                    <div class="control-hint">Chỉ trade nếu ATR > threshold</div>
+                </div>
+
+                <div class="control-group">
+                    <label class="control-label">🎯 Min Signal Strength (%)</label>
+                    <input type="number" id="minSignalStrength" class="control-input" min="50" max="100" value="70" step="5" placeholder="70">
+                    <div class="control-hint">Consensus yêu cầu từ indicators</div>
+                </div>
             </div>
 
             <div class="button-group">
@@ -792,6 +836,19 @@
             const riskPercent = parseFloat(document.getElementById('riskPercent').value);
             const rrRatio = parseFloat(document.getElementById('rrRatio').value);
             const slPercent = parseFloat(document.getElementById('slPercent').value);
+            
+            // Filter settings
+            const filters = {
+                enableMAFilter: document.getElementById('enableMAFilter').checked,
+                maValue: parseInt(document.getElementById('maValue').value),
+                enableVolumeFilter: document.getElementById('enableVolumeFilter').checked,
+                volumeThreshold: parseInt(document.getElementById('volumeThreshold').value),
+                enableTrendFilter: document.getElementById('enableTrendFilter').checked,
+                trendMA: parseInt(document.getElementById('trendMA').value),
+                enableVolatilityFilter: document.getElementById('enableVolatilityFilter').checked,
+                minATR: parseFloat(document.getElementById('minATR').value),
+                minSignalStrength: parseInt(document.getElementById('minSignalStrength').value)
+            };
 
             if (minCombo > maxCombo || minCombo < 2 || maxCombo >= 20) {
                 alert('⚠️ Kích thước tổ hợp không hợp lệ!');
@@ -807,7 +864,7 @@
             document.getElementById('chartSection').classList.remove('active');
 
             const combinations = generateCombinations(INDICATORS, minCombo, maxCombo);
-            processCombinations(combinations, csvData, threshold, riskPercent, rrRatio, slPercent);
+            processCombinations(combinations, csvData, threshold, riskPercent, rrRatio, slPercent, filters);
         }
 
         function* generateCombinations(arr, minSize, maxSize) {
@@ -828,7 +885,7 @@
             }
         }
 
-        function processCombinations(combos, data, threshold, riskPercent, rrRatio, slPercent) {
+        function processCombinations(combos, data, threshold, riskPercent, rrRatio, slPercent, filters) {
             const comboArray = Array.from(combos);
             let processed = 0;
             let totalTrades = 0;
@@ -837,7 +894,7 @@
                 const chunkSize = 5;
                 for (let i = 0; i < chunkSize && processed < comboArray.length; i++) {
                     const combo = comboArray[processed];
-                    const result = backtestCombo(combo, data, threshold, riskPercent, rrRatio, slPercent);
+                    const result = backtestCombo(combo, data, threshold, riskPercent, rrRatio, slPercent, filters);
                     
                     if (result.trades > 0) {
                         allResults.push({
@@ -870,7 +927,75 @@
             processChunk();
         }
 
-        function backtestCombo(combo, data, threshold, riskPercent, rrRatio, slPercent) {
+        // Helper functions for entry filters
+        function calculateMA(data, period) {
+            const ma = [];
+            for (let i = 0; i < data.length; i++) {
+                if (i < period - 1) {
+                    ma.push(null);
+                } else {
+                    let sum = 0;
+                    for (let j = i - period + 1; j <= i; j++) {
+                        sum += data[j].close;
+                    }
+                    ma.push(sum / period);
+                }
+            }
+            return ma;
+        }
+
+        function calculateAverageVolume(data) {
+            const sampleSize = Math.min(100, data.length);
+            const sum = data.slice(0, sampleSize).reduce((acc, d) => acc + d.volume, 0);
+            return sum / sampleSize;
+        }
+
+        function calculateATR(data, idx, period = 14) {
+            if (idx < period) return 0;
+            let trSum = 0;
+            for (let i = idx - period + 1; i <= idx; i++) {
+                const prevClose = i > 0 ? data[i - 1].close : data[i].close;
+                const tr = Math.max(
+                    data[i].high - data[i].low,
+                    Math.abs(data[i].high - prevClose),
+                    Math.abs(data[i].low - prevClose)
+                );
+                trSum += tr;
+            }
+            return trSum / period;
+        }
+
+        function passEntryFilters(data, idx, entryType, ma50, ma200, avgVolume, filters) {
+            const candle = data[idx];
+            
+            // MA Filter - Price above/below MA50
+            if (filters.enableMAFilter && ma50[idx] !== null) {
+                if (entryType === 'LONG' && candle.close <= ma50[idx]) return false;
+                if (entryType === 'SHORT' && candle.close >= ma50[idx]) return false;
+            }
+            
+            // Volume Filter - Volume above threshold
+            if (filters.enableVolumeFilter) {
+                const minVol = avgVolume * (filters.volumeThreshold / 100);
+                if (candle.volume < minVol) return false;
+            }
+            
+            // Trend Filter - Price above/below MA200
+            if (filters.enableTrendFilter && ma200[idx] !== null) {
+                if (entryType === 'LONG' && candle.close <= ma200[idx]) return false;
+                if (entryType === 'SHORT' && candle.close >= ma200[idx]) return false;
+            }
+            
+            // Volatility Filter - ATR above minimum
+            if (filters.enableVolatilityFilter) {
+                const atr = calculateATR(data, idx, 14);
+                if (atr < filters.minATR) return false;
+            }
+            
+            return true;
+        }
+
+        function backtestCombo(combo, data, threshold, riskPercent, rrRatio, slPercent, filters) {
             const comboSize = combo.length;
             let trades = 0;
             let wins = 0;
@@ -880,11 +1005,17 @@
             let tradesList = [];
             let currentPosition = null;
             const riskAmount = (balance * riskPercent) / 100;
+            
+            // Pre-calculate moving averages & volume for filters
+            const ma50 = calculateMA(data, filters.maValue || 50);
+            const ma200 = calculateMA(data, filters.trendMA || 200);
+            const avgVolume = calculateAverageVolume(data);
 
             for (let i = 50; i < data.length - 1; i++) {
                 const signals = generateSignals(combo, data, i);
                 const bullishCount = signals.filter(s => s > 0).length;
                 const bearishCount = signals.filter(s => s < 0).length;
+                const signalStrength = Math.max(bullishCount, bearishCount) / comboSize * 100;
 
                 let entryType = null;
                 if (comboSize === 2) {
@@ -898,6 +1029,18 @@
                     const bearishPct = (bearishCount / comboSize) * 100;
                     if (bullishPct >= threshold) entryType = 'LONG';
                     else if (bearishPct >= threshold) entryType = 'SHORT';
+                }
+
+                // Check signal strength filter
+                if (entryType && signalStrength < filters.minSignalStrength) {
+                    entryType = null;
+                }
+
+                if (entryType) {
+                    // Check entry filters
+                    if (!passEntryFilters(data, i, entryType, ma50, ma200, avgVolume, filters)) {
+                        entryType = null;
+                    }
                 }
 
                 if (entryType) {
