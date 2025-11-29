@@ -57,7 +57,7 @@ export const FileUpload: React.FC = () => {
   return (
     <div className="card">
       <div 
-        className="border-2 border-dashed border-primary rounded-lg p-8 text-center cursor-pointer hover:bg-primary/5 transition-all"
+        className="border-2 border-dashed border-primary rounded-lg p-2 text-center cursor-pointer hover:bg-primary/5 transition-all"
         onClick={() => fileInputRef.current?.click()}
       >
         <div className="text-secondary text-xl mb-3">📊 Kéo file CSV vào đây hoặc click để chọn</div>

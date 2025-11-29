@@ -282,24 +282,30 @@ export const StrategyBuilder: React.FC = () => {
         </div>
       </div>
 
-      {/* Strategy Name */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg">
-        <label className="block text-sm font-bold mb-2">Strategy Name</label>
-        <input
-          type="text"
-          value={strategy.name}
-          onChange={(e) => setStrategy(prev => ({ ...prev, name: e.target.value }))}
-          className="w-full px-4 py-2 border rounded-lg"
-          placeholder="My Strategy"
-        />
-        <label className="block text-sm font-bold mb-2 mt-4">Description</label>
-        <textarea
-          value={strategy.description}
-          onChange={(e) => setStrategy(prev => ({ ...prev, description: e.target.value }))}
-          className="w-full px-4 py-2 border rounded-lg"
-          rows={2}
-          placeholder="Strategy description..."
-        />
+      {/* Strategy Name & Description */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-lg">
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-bold mb-1">Strategy Name</label>
+            <input
+              type="text"
+              value={strategy.name}
+              onChange={(e) => setStrategy(prev => ({ ...prev, name: e.target.value }))}
+              className="w-full px-3 py-1.5 text-sm border rounded-lg"
+              placeholder="My Strategy"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold mb-1">Description</label>
+            <input
+              type="text"
+              value={strategy.description}
+              onChange={(e) => setStrategy(prev => ({ ...prev, description: e.target.value }))}
+              className="w-full px-3 py-1.5 text-sm border rounded-lg"
+              placeholder="Strategy description..."
+            />
+          </div>
+        </div>
       </div>
 
       {/* Indicator Selector */}
@@ -310,58 +316,64 @@ export const StrategyBuilder: React.FC = () => {
 
       {/* Selected Indicators */}
       {strategy.indicators.length > 0 && (
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg">
-          <h3 className="text-xl font-bold mb-4">
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-lg">
+          <h3 className="text-lg font-bold mb-3">
             📊 Selected Indicators ({strategy.indicators.filter(ind => ind.enabled).length}/{strategy.indicators.length})
           </h3>
-          <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-3">
             {strategy.indicators.map((ind, index) => {
               const contribution = totalWeight > 0 ? (ind.weight / totalWeight * 100).toFixed(1) : '0.0'
               return (
                 <div
                   key={index}
-                  className={`flex items-center gap-4 p-4 rounded-lg border-2 ${
+                  className={`flex flex-col gap-2 p-3 rounded-lg border-2 ${
                     ind.enabled ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-300 bg-gray-50 dark:bg-gray-700 opacity-50'
                   }`}
                 >
-                  <input
-                    type="checkbox"
-                    checked={ind.enabled}
-                    onChange={() => toggleIndicator(index)}
-                    className="w-5 h-5"
-                  />
-                  <div className="flex-1">
-                    <div className="font-bold">{ind.type}</div>
-                    <div className="text-xs text-gray-600 dark:text-gray-400">
-                      Config: {JSON.stringify(ind.config)}
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={ind.enabled}
+                      onChange={() => toggleIndicator(index)}
+                      className="w-4 h-4"
+                    />
+                    <div className="flex-1">
+                      <div className="font-bold text-sm">{ind.type}</div>
+                      <div className="text-[10px] text-gray-600 dark:text-gray-400 truncate">
+                        {JSON.stringify(ind.config)}
+                      </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <label className="text-sm font-bold">Weight:</label>
-                    <input
-                      type="number"
-                      value={ind.weight}
-                      onChange={(e) => updateIndicatorWeight(index, parseFloat(e.target.value) || 1)}
-                      className="w-20 px-2 py-1 border rounded"
-                      min="0.1"
-                      step="0.1"
-                    />
-                    <span className="text-sm font-bold text-blue-600">
-                      ({contribution}%)
-                    </span>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <label className="text-xs font-bold">Weight:</label>
+                      <input
+                        type="number"
+                        value={ind.weight}
+                        onChange={(e) => updateIndicatorWeight(index, parseFloat(e.target.value) || 1)}
+                        className="w-16 px-2 py-0.5 text-xs border rounded"
+                        min="0.1"
+                        step="0.1"
+                      />
+                      <span className="text-xs font-bold text-blue-600">
+                        ({contribution}%)
+                      </span>
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        className="btn-secondary text-xs px-2 py-1"
+                        onClick={() => openEditModal(index)}
+                      >
+                        ⚙️
+                      </button>
+                      <button
+                        className="btn-danger text-xs px-2 py-1"
+                        onClick={() => removeIndicator(index)}
+                      >
+                        ❌
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    className="btn-secondary text-sm"
-                    onClick={() => openEditModal(index)}
-                  >
-                    ⚙️ Config
-                  </button>
-                  <button
-                    className="btn-danger text-sm"
-                    onClick={() => removeIndicator(index)}
-                  >
-                    ❌
-                  </button>
                 </div>
               )
             })}
@@ -397,24 +409,24 @@ export const StrategyBuilder: React.FC = () => {
       />
 
       {/* Risk Management */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg">
-        <h3 className="text-xl font-bold mb-4">💰 Risk Management</h3>
-        <div className="grid grid-cols-4 gap-4">
+      <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-lg">
+        <h3 className="text-lg font-bold mb-3">💰 Risk Management</h3>
+        <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-sm font-bold mb-2">Initial Capital ($)</label>
+            <label className="block text-xs font-bold mb-1">Initial Capital ($)</label>
             <input
               type="number"
               value={strategy.risk_management.capital}
               onChange={(e) => setStrategy(prev => ({
                 ...prev,
-                risk_management: { ...prev.risk_management, capital: parseFloat(e.target.value) || 10000 }
+                risk_management: { ...prev.risk_management, capital: parseFloat(e.target.value) || 1000 }
               }))}
-              className="w-full px-4 py-2 border rounded-lg"
+              className="w-full px-3 py-1.5 text-sm border rounded-lg"
               step="100"
             />
           </div>
           <div>
-            <label className="block text-sm font-bold mb-2">Risk per Trade (%)</label>
+            <label className="block text-xs font-bold mb-1">Risk per Trade (%)</label>
             <input
               type="number"
               value={strategy.risk_management.risk_percent}
@@ -422,25 +434,25 @@ export const StrategyBuilder: React.FC = () => {
                 ...prev,
                 risk_management: { ...prev.risk_management, risk_percent: parseFloat(e.target.value) || 1.0 }
               }))}
-              className="w-full px-4 py-2 border rounded-lg"
+              className="w-full px-3 py-1.5 text-sm border rounded-lg"
               step="0.1"
             />
           </div>
           <div>
-            <label className="block text-sm font-bold mb-2">Reward Ratio</label>
+            <label className="block text-xs font-bold mb-1">Reward Ratio</label>
             <input
               type="number"
               value={strategy.risk_management.reward_ratio}
               onChange={(e) => setStrategy(prev => ({
                 ...prev,
-                risk_management: { ...prev.risk_management, reward_ratio: parseFloat(e.target.value) || 2.0 }
+                risk_management: { ...prev.risk_management, reward_ratio: parseFloat(e.target.value) || 1.0 }
               }))}
-              className="w-full px-4 py-2 border rounded-lg"
+              className="w-full px-3 py-1.5 text-sm border rounded-lg"
               step="0.1"
             />
           </div>
           <div>
-            <label className="block text-sm font-bold mb-2">Stop Loss (%)</label>
+            <label className="block text-xs font-bold mb-1">Stop Loss (%)</label>
             <input
               type="number"
               value={strategy.risk_management.stop_loss_percent}
@@ -448,7 +460,7 @@ export const StrategyBuilder: React.FC = () => {
                 ...prev,
                 risk_management: { ...prev.risk_management, stop_loss_percent: parseFloat(e.target.value) || 1.0 }
               }))}
-              className="w-full px-4 py-2 border rounded-lg"
+              className="w-full px-3 py-1.5 text-sm border rounded-lg"
               step="0.1"
             />
           </div>
@@ -457,13 +469,6 @@ export const StrategyBuilder: React.FC = () => {
 
       {/* Action Buttons */}
       <div className="flex gap-4">
-        <button
-          className="btn-secondary flex-1"
-          onClick={runPreview}
-          disabled={isRunning || !csvData}
-        >
-          👁️ Preview Signals
-        </button>
         <button
           className="btn-primary flex-1"
           onClick={runBacktest}

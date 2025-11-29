@@ -11,7 +11,7 @@ import { StrategyBuilder } from './components/StrategyBuilder'
 function App() {
   const { csvData, params, setProgress, setResults, progress, results, showChart } = useOptimizerStore()
   const [startTime, setStartTime] = useState(0)
-  const [activeMode, setActiveMode] = useState<'optimizer' | 'strategy'>('optimizer')
+  const [activeMode, setActiveMode] = useState<'optimizer' | 'strategy'>('strategy')
 
   const runOptimization = async () => {
     if (!csvData || csvData.length < 100) {
@@ -83,29 +83,17 @@ function App() {
   return (
     <div className="min-h-screen p-6">
       <div className="max-w-7xl mx-auto">
-        <header className="gradient-header rounded-2xl p-8 text-center mb-8 shadow-2xl">
-          <h1 className="text-4xl font-bold mb-3">🎯 Combo Optimizer v1.4</h1>
-          <p className="text-lg opacity-90">
-            Tìm Tổ Hợp Chỉ Báo Tối Ưu + Strategy Builder
-          </p>
-          <div className="mt-3 inline-block bg-green-500 text-white px-6 py-2 rounded-full text-sm font-bold">
-            ✅ React + TypeScript + FastAPI + Weighted Indicators
-          </div>
+        <header className="gradient-header rounded-2xl p-4 text-center mb-6 shadow-2xl">
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <h1 className="text-2xl font-bold">🎯 Combo Optimizer v1.4</h1>
+              <p className="text-xs opacity-90 mt-1">Strategy Builder + Combo Optimizer</p>
+            </div>
 
-          {/* Mode Switcher */}
-          <div className="mt-6 flex justify-center gap-4">
+            {/* Mode Switcher */}
+            <div className="flex gap-3">
             <button
-              className={`px-6 py-3 rounded-lg font-bold transition-all ${
-                activeMode === 'optimizer'
-                  ? 'bg-white text-blue-600 shadow-lg'
-                  : 'bg-white/20 text-white hover:bg-white/30'
-              }`}
-              onClick={() => setActiveMode('optimizer')}
-            >
-              🔍 Combo Optimizer
-            </button>
-            <button
-              className={`px-6 py-3 rounded-lg font-bold transition-all ${
+              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
                 activeMode === 'strategy'
                   ? 'bg-white text-blue-600 shadow-lg'
                   : 'bg-white/20 text-white hover:bg-white/30'
@@ -114,6 +102,17 @@ function App() {
             >
               🎯 Strategy Builder
             </button>
+            <button
+              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+                activeMode === 'optimizer'
+                  ? 'bg-white text-blue-600 shadow-lg'
+                  : 'bg-white/20 text-white hover:bg-white/30'
+              }`}
+              onClick={() => setActiveMode('optimizer')}
+            >
+              🔍 Combo Optimizer
+            </button>
+          </div>
           </div>
         </header>
 

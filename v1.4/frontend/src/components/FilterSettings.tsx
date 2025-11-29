@@ -12,32 +12,32 @@ export const FilterSettings: React.FC<Props> = ({ filters, onChange }) => {
   }
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg">
-      <h3 className="text-xl font-bold mb-4">🔧 Optional Filters</h3>
-      <p className="text-sm text-gray-600 mb-4">
+    <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-lg">
+      <h3 className="text-lg font-bold mb-2">🔧 Optional Filters</h3>
+      <p className="text-xs text-gray-600 mb-3">
         Các filter này sẽ loại bỏ tín hiệu không đạt điều kiện
       </p>
 
-      <div className="space-y-4">
+      <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
         {/* ADX Filter */}
-        <div className="p-4 border rounded-lg">
-          <label className="flex items-center gap-2 mb-3">
+        <div className="p-3 border rounded-lg">
+          <label className="flex items-center gap-1.5 mb-2">
             <input
               type="checkbox"
               checked={filters.enable_adx}
               onChange={(e) => updateFilter('enable_adx', e.target.checked)}
-              className="w-5 h-5"
+              className="w-4 h-4"
             />
-            <span className="font-bold">💪 ADX Filter (Trend Strength)</span>
+            <span className="font-bold text-xs">💪 ADX</span>
           </label>
           {filters.enable_adx && (
-            <div className="ml-7">
-              <label className="block text-sm mb-1">ADX Threshold</label>
+            <div>
+              <label className="block text-[10px] mb-0.5">Threshold</label>
               <input
                 type="number"
                 value={filters.adx_threshold}
                 onChange={(e) => updateFilter('adx_threshold', parseFloat(e.target.value))}
-                className="w-full px-3 py-2 border rounded"
+                className="w-full px-2 py-1 text-xs border rounded"
                 step="1"
               />
             </div>
@@ -45,24 +45,24 @@ export const FilterSettings: React.FC<Props> = ({ filters, onChange }) => {
         </div>
 
         {/* Volume Filter */}
-        <div className="p-4 border rounded-lg">
-          <label className="flex items-center gap-2 mb-3">
+        <div className="p-3 border rounded-lg">
+          <label className="flex items-center gap-1.5 mb-2">
             <input
               type="checkbox"
               checked={filters.enable_volume}
               onChange={(e) => updateFilter('enable_volume', e.target.checked)}
-              className="w-5 h-5"
+              className="w-4 h-4"
             />
-            <span className="font-bold">📦 Volume Filter</span>
+            <span className="font-bold text-xs">📦 Volume</span>
           </label>
           {filters.enable_volume && (
-            <div className="ml-7">
-              <label className="block text-sm mb-1">Volume Threshold (multiplier)</label>
+            <div>
+              <label className="block text-[10px] mb-0.5">Multiplier</label>
               <input
                 type="number"
                 value={filters.volume_threshold}
                 onChange={(e) => updateFilter('volume_threshold', parseFloat(e.target.value))}
-                className="w-full px-3 py-2 border rounded"
+                className="w-full px-2 py-1 text-xs border rounded"
                 step="0.1"
               />
             </div>
@@ -70,24 +70,24 @@ export const FilterSettings: React.FC<Props> = ({ filters, onChange }) => {
         </div>
 
         {/* MA Filter */}
-        <div className="p-4 border rounded-lg">
-          <label className="flex items-center gap-2 mb-3">
+        <div className="p-3 border rounded-lg">
+          <label className="flex items-center gap-1.5 mb-2">
             <input
               type="checkbox"
               checked={filters.enable_ma_filter}
               onChange={(e) => updateFilter('enable_ma_filter', e.target.checked)}
-              className="w-5 h-5"
+              className="w-4 h-4"
             />
-            <span className="font-bold">〰️ MA Filter (Price vs MA)</span>
+            <span className="font-bold text-xs">〰️ MA</span>
           </label>
           {filters.enable_ma_filter && (
-            <div className="ml-7">
-              <label className="block text-sm mb-1">MA Period</label>
+            <div>
+              <label className="block text-[10px] mb-0.5">Period</label>
               <input
                 type="number"
                 value={filters.ma_period}
                 onChange={(e) => updateFilter('ma_period', parseInt(e.target.value))}
-                className="w-full px-3 py-2 border rounded"
+                className="w-full px-2 py-1 text-xs border rounded"
                 step="1"
               />
             </div>
@@ -95,24 +95,24 @@ export const FilterSettings: React.FC<Props> = ({ filters, onChange }) => {
         </div>
 
         {/* ATR Filter */}
-        <div className="p-4 border rounded-lg">
-          <label className="flex items-center gap-2 mb-3">
+        <div className="p-3 border rounded-lg">
+          <label className="flex items-center gap-1.5 mb-2">
             <input
               type="checkbox"
               checked={filters.enable_atr_filter}
               onChange={(e) => updateFilter('enable_atr_filter', e.target.checked)}
-              className="w-5 h-5"
+              className="w-4 h-4"
             />
-            <span className="font-bold">📏 ATR Filter (Volatility)</span>
+            <span className="font-bold text-xs">📏 ATR</span>
           </label>
           {filters.enable_atr_filter && (
-            <div className="ml-7">
-              <label className="block text-sm mb-1">Min ATR</label>
+            <div>
+              <label className="block text-[10px] mb-0.5">Min ATR</label>
               <input
                 type="number"
                 value={filters.min_atr}
                 onChange={(e) => updateFilter('min_atr', parseFloat(e.target.value))}
-                className="w-full px-3 py-2 border rounded"
+                className="w-full px-2 py-1 text-xs border rounded"
                 step="0.0001"
               />
             </div>
@@ -120,24 +120,24 @@ export const FilterSettings: React.FC<Props> = ({ filters, onChange }) => {
         </div>
 
         {/* Trend Filter */}
-        <div className="p-4 border rounded-lg">
-          <label className="flex items-center gap-2 mb-3">
+        <div className="p-3 border rounded-lg">
+          <label className="flex items-center gap-1.5 mb-2">
             <input
               type="checkbox"
               checked={filters.enable_trend_filter}
               onChange={(e) => updateFilter('enable_trend_filter', e.target.checked)}
-              className="w-5 h-5"
+              className="w-4 h-4"
             />
-            <span className="font-bold">📈 Trend Filter (Long-term MA)</span>
+            <span className="font-bold text-xs">📈 Trend</span>
           </label>
           {filters.enable_trend_filter && (
-            <div className="ml-7">
-              <label className="block text-sm mb-1">Trend MA Period</label>
+            <div>
+              <label className="block text-[10px] mb-0.5">MA Period</label>
               <input
                 type="number"
                 value={filters.trend_ma}
                 onChange={(e) => updateFilter('trend_ma', parseInt(e.target.value))}
-                className="w-full px-3 py-2 border rounded"
+                className="w-full px-2 py-1 text-xs border rounded"
                 step="1"
               />
             </div>
