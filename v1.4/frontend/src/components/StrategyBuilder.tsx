@@ -1,0 +1,601 @@
+import React, { useState, useEffect } from 'react'
+import { Strategy, AvailableIndicator, IndicatorConfig, BacktestResult, StrategyListItem } from '../types'
+import { strategyAPI } from '../services/api'
+import { IndicatorSelector } from './IndicatorSelector'
+import { IndicatorConfigModal } from './IndicatorConfigModal'
+import { FilterSettings } from './FilterSettings'
+import { StrategyResults } from './StrategyResults'
+import { StrategyChart } from './StrategyChart'
+import { ProgressBar } from './ProgressBar'
+import { useOptimizerStore } from '../store/optimizerStore'
+
+export const StrategyBuilder: React.FC = () => {
+  const { csvData } = useOptimizerStore()
+  
+  const [availableIndicators, setAvailableIndicators] = useState<AvailableIndicator[]>([])
+  const [strategy, setStrategy] = useState<Strategy>({
+    name: 'My Strategy',
+    description: '',
+    indicators: [],
+    signal_logic: { threshold_percent: 60 },
+    filters: {
+      enable_adx: false,
+      adx_threshold: 25,
+      enable_volume: false,
+      volume_threshold: 1.5,
+      enable_ma_filter: false,
+      ma_period: 50,
+      enable_atr_filter: false,
+      min_atr: 0.0005,
+      enable_trend_filter: false,
+      trend_ma: 200
+    },
+    risk_management: {
+      risk_percent: 1.0,
+      reward_ratio: 2.0,
+      stop_loss_percent: 1.0,
+      capital: 10000
+    }
+  })
+  
+  const [editingIndicator, setEditingIndicator] = useState<{ index: number; config: IndicatorConfig } | null>(null)
+  const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null)
+  const [isRunning, setIsRunning] = useState(false)
+  const [backtestProgress, setBacktestProgress] = useState({ progress: 0, tested: 0, withTrades: 0, timeElapsed: 0 })
+  const [preview, setPreview] = useState<{ total: number; long: number; short: number } | null>(null)
+  const [savedStrategies, setSavedStrategies] = useState<StrategyListItem[]>([])
+  const [showSaveModal, setShowSaveModal] = useState(false)
+  const [showLoadModal, setShowLoadModal] = useState(false)
+
+  useEffect(() => {
+    loadAvailableIndicators()
+    loadSavedStrategies()
+  }, [])
+
+  const loadAvailableIndicators = async () => {
+    try {
+      const data = await strategyAPI.listIndicators()
+      setAvailableIndicators(data.indicators)
+    } catch (error) {
+      console.error('Failed to load indicators:', error)
+    }
+  }
+
+  const loadSavedStrategies = async () => {
+    try {
+      const data = await strategyAPI.listStrategies()
+      setSavedStrategies(data.strategies)
+    } catch (error) {
+      console.error('Failed to load strategies:', error)
+    }
+  }
+
+  const addIndicator = (type: string) => {
+    const indicator = availableIndicators.find(ind => ind.type === type)
+    if (!indicator) return
+
+    const newIndicator: IndicatorConfig = {
+      type,
+      config: { ...indicator.default_config },
+      weight: 1,
+      enabled: true
+    }
+
+    setStrategy(prev => ({
+      ...prev,
+      indicators: [...prev.indicators, newIndicator]
+    }))
+  }
+
+  const removeIndicator = (index: number) => {
+    setStrategy(prev => ({
+      ...prev,
+      indicators: prev.indicators.filter((_, i) => i !== index)
+    }))
+  }
+
+  const toggleIndicator = (index: number) => {
+    setStrategy(prev => ({
+      ...prev,
+      indicators: prev.indicators.map((ind, i) =>
+        i === index ? { ...ind, enabled: !ind.enabled } : ind
+      )
+    }))
+  }
+
+  const updateIndicatorWeight = (index: number, weight: number) => {
+    setStrategy(prev => ({
+      ...prev,
+      indicators: prev.indicators.map((ind, i) =>
+        i === index ? { ...ind, weight } : ind
+      )
+    }))
+  }
+
+  const openEditModal = (index: number) => {
+    setEditingIndicator({ index, config: { ...strategy.indicators[index] } })
+  }
+
+  const saveIndicatorConfig = (config: IndicatorConfig) => {
+    if (editingIndicator === null) return
+
+    setStrategy(prev => ({
+      ...prev,
+      indicators: prev.indicators.map((ind, i) =>
+        i === editingIndicator.index ? config : ind
+      )
+    }))
+    setEditingIndicator(null)
+  }
+
+  const runPreview = async () => {
+    if (!csvData || csvData.length < 100) {
+      alert('⚠️ Cần upload CSV trước!')
+      return
+    }
+
+    if (strategy.indicators.filter(ind => ind.enabled).length === 0) {
+      alert('⚠️ Cần ít nhất 1 indicator được bật!')
+      return
+    }
+
+    try {
+      const data = await strategyAPI.previewSignals({
+        strategy,
+        ohlcv_data: csvData
+      })
+      setPreview(data)
+    } catch (error) {
+      alert('❌ Preview failed: ' + (error as Error).message)
+    }
+  }
+
+  const runBacktest = async () => {
+    if (!csvData || csvData.length < 100) {
+      alert('⚠️ Cần upload CSV trước!')
+      return
+    }
+
+    if (strategy.indicators.filter(ind => ind.enabled).length === 0) {
+      alert('⚠️ Cần ít nhất 1 indicator được bật!')
+      return
+    }
+
+    setIsRunning(true)
+    setBacktestResult(null)
+    setBacktestProgress({ progress: 0, tested: 0, withTrades: 0, timeElapsed: 0 })
+
+    // Simulate progress
+    let progress = 0
+    let tested = 0
+    const progressInterval = setInterval(() => {
+      if (progress < 95) {
+        progress += Math.random() * 30
+        tested += Math.floor(Math.random() * 50)
+        setBacktestProgress(prev => ({
+          progress: Math.min(progress, 95),
+          tested: tested,
+          withTrades: Math.floor(tested * 0.3),
+          timeElapsed: prev.timeElapsed + 1
+        }))
+      }
+    }, 500)
+
+    try {
+      const result = await strategyAPI.backtestStrategy({
+        strategy,
+        ohlcv_data: csvData
+      })
+      clearInterval(progressInterval)
+      setBacktestProgress({ progress: 100, tested, withTrades: Math.floor(tested * 0.3), timeElapsed: backtestProgress.timeElapsed })
+      setBacktestResult(result)
+    } catch (error) {
+      clearInterval(progressInterval)
+      alert('❌ Backtest failed: ' + (error as Error).message)
+    } finally {
+      setIsRunning(false)
+    }
+  }
+
+  const saveStrategy = async () => {
+    if (!strategy.name.trim()) {
+      alert('⚠️ Nhập tên strategy!')
+      return
+    }
+
+    try {
+      await strategyAPI.saveStrategy(strategy)
+      alert('✅ Đã lưu strategy!')
+      setShowSaveModal(false)
+      loadSavedStrategies()
+    } catch (error) {
+      alert('❌ Save failed: ' + (error as Error).message)
+    }
+  }
+
+  const loadStrategy = async (name: string) => {
+    try {
+      const loaded = await strategyAPI.loadStrategy(name)
+      setStrategy(loaded)
+      setShowLoadModal(false)
+      alert('✅ Đã load strategy!')
+    } catch (error) {
+      alert('❌ Load failed: ' + (error as Error).message)
+    }
+  }
+
+  const deleteStrategy = async (name: string) => {
+    if (!confirm(`Xóa strategy "${name}"?`)) return
+
+    try {
+      await strategyAPI.deleteStrategy(name)
+      alert('✅ Đã xóa!')
+      loadSavedStrategies()
+    } catch (error) {
+      alert('❌ Delete failed: ' + (error as Error).message)
+    }
+  }
+
+  const exportPineScript = async () => {
+    try {
+      const result = await strategyAPI.exportPineScript(strategy)
+      
+      // Download as file
+      const blob = new Blob([result.code], { type: 'text/plain' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${result.strategy_name}.pine`
+      a.click()
+      URL.revokeObjectURL(url)
+      
+      alert('✅ Đã export Pine Script!')
+    } catch (error) {
+      alert('❌ Export failed: ' + (error as Error).message)
+    }
+  }
+
+  const totalWeight = strategy.indicators
+    .filter(ind => ind.enabled)
+    .reduce((sum, ind) => sum + ind.weight, 0)
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="gradient-header rounded-2xl p-6 shadow-xl">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-3xl font-bold">🎯 Strategy Builder</h2>
+            <p className="text-sm opacity-90 mt-1">Xây dựng chiến lược tùy chỉnh với weighted indicators</p>
+          </div>
+          <div className="flex gap-2">
+            <button className="btn-secondary" onClick={() => setShowLoadModal(true)}>
+              📂 Load
+            </button>
+            <button className="btn-secondary" onClick={() => setShowSaveModal(true)}>
+              💾 Save
+            </button>
+            <button className="btn-secondary" onClick={exportPineScript}>
+              📤 Export Pine
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Strategy Name */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg">
+        <label className="block text-sm font-bold mb-2">Strategy Name</label>
+        <input
+          type="text"
+          value={strategy.name}
+          onChange={(e) => setStrategy(prev => ({ ...prev, name: e.target.value }))}
+          className="w-full px-4 py-2 border rounded-lg"
+          placeholder="My Strategy"
+        />
+        <label className="block text-sm font-bold mb-2 mt-4">Description</label>
+        <textarea
+          value={strategy.description}
+          onChange={(e) => setStrategy(prev => ({ ...prev, description: e.target.value }))}
+          className="w-full px-4 py-2 border rounded-lg"
+          rows={2}
+          placeholder="Strategy description..."
+        />
+      </div>
+
+      {/* Indicator Selector */}
+      <IndicatorSelector
+        availableIndicators={availableIndicators}
+        onAddIndicator={addIndicator}
+      />
+
+      {/* Selected Indicators */}
+      {strategy.indicators.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg">
+          <h3 className="text-xl font-bold mb-4">
+            📊 Selected Indicators ({strategy.indicators.filter(ind => ind.enabled).length}/{strategy.indicators.length})
+          </h3>
+          <div className="space-y-3">
+            {strategy.indicators.map((ind, index) => {
+              const contribution = totalWeight > 0 ? (ind.weight / totalWeight * 100).toFixed(1) : '0.0'
+              return (
+                <div
+                  key={index}
+                  className={`flex items-center gap-4 p-4 rounded-lg border-2 ${
+                    ind.enabled ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-300 bg-gray-50 dark:bg-gray-700 opacity-50'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={ind.enabled}
+                    onChange={() => toggleIndicator(index)}
+                    className="w-5 h-5"
+                  />
+                  <div className="flex-1">
+                    <div className="font-bold">{ind.type}</div>
+                    <div className="text-xs text-gray-600 dark:text-gray-400">
+                      Config: {JSON.stringify(ind.config)}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm font-bold">Weight:</label>
+                    <input
+                      type="number"
+                      value={ind.weight}
+                      onChange={(e) => updateIndicatorWeight(index, parseFloat(e.target.value) || 1)}
+                      className="w-20 px-2 py-1 border rounded"
+                      min="0.1"
+                      step="0.1"
+                    />
+                    <span className="text-sm font-bold text-blue-600">
+                      ({contribution}%)
+                    </span>
+                  </div>
+                  <button
+                    className="btn-secondary text-sm"
+                    onClick={() => openEditModal(index)}
+                  >
+                    ⚙️ Config
+                  </button>
+                  <button
+                    className="btn-danger text-sm"
+                    onClick={() => removeIndicator(index)}
+                  >
+                    ❌
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Signal Threshold */}
+          <div className="mt-6 p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+            <label className="block text-sm font-bold mb-2">
+              📈 Signal Threshold: {strategy.signal_logic.threshold_percent}%
+            </label>
+            <input
+              type="range"
+              min="50"
+              max="100"
+              value={strategy.signal_logic.threshold_percent}
+              onChange={(e) => setStrategy(prev => ({
+                ...prev,
+                signal_logic: { threshold_percent: parseInt(e.target.value) }
+              }))}
+              className="w-full"
+            />
+            <p className="text-xs text-gray-600 mt-1">
+              Tín hiệu chỉ kích hoạt khi bullish hoặc bearish percent &gt;= threshold
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Filter Settings */}
+      <FilterSettings
+        filters={strategy.filters}
+        onChange={(filters) => setStrategy(prev => ({ ...prev, filters }))}
+      />
+
+      {/* Risk Management */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg">
+        <h3 className="text-xl font-bold mb-4">💰 Risk Management</h3>
+        <div className="grid grid-cols-4 gap-4">
+          <div>
+            <label className="block text-sm font-bold mb-2">Initial Capital ($)</label>
+            <input
+              type="number"
+              value={strategy.risk_management.capital}
+              onChange={(e) => setStrategy(prev => ({
+                ...prev,
+                risk_management: { ...prev.risk_management, capital: parseFloat(e.target.value) || 10000 }
+              }))}
+              className="w-full px-4 py-2 border rounded-lg"
+              step="100"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-bold mb-2">Risk per Trade (%)</label>
+            <input
+              type="number"
+              value={strategy.risk_management.risk_percent}
+              onChange={(e) => setStrategy(prev => ({
+                ...prev,
+                risk_management: { ...prev.risk_management, risk_percent: parseFloat(e.target.value) || 1.0 }
+              }))}
+              className="w-full px-4 py-2 border rounded-lg"
+              step="0.1"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-bold mb-2">Reward Ratio</label>
+            <input
+              type="number"
+              value={strategy.risk_management.reward_ratio}
+              onChange={(e) => setStrategy(prev => ({
+                ...prev,
+                risk_management: { ...prev.risk_management, reward_ratio: parseFloat(e.target.value) || 2.0 }
+              }))}
+              className="w-full px-4 py-2 border rounded-lg"
+              step="0.1"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-bold mb-2">Stop Loss (%)</label>
+            <input
+              type="number"
+              value={strategy.risk_management.stop_loss_percent}
+              onChange={(e) => setStrategy(prev => ({
+                ...prev,
+                risk_management: { ...prev.risk_management, stop_loss_percent: parseFloat(e.target.value) || 1.0 }
+              }))}
+              className="w-full px-4 py-2 border rounded-lg"
+              step="0.1"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="flex gap-4">
+        <button
+          className="btn-secondary flex-1"
+          onClick={runPreview}
+          disabled={isRunning || !csvData}
+        >
+          👁️ Preview Signals
+        </button>
+        <button
+          className="btn-primary flex-1"
+          onClick={runBacktest}
+          disabled={isRunning || !csvData}
+        >
+          {isRunning ? '⏳ Running...' : '▶️ Run Backtest'}
+        </button>
+      </div>
+
+      {/* Preview Result */}
+      {preview && (
+        <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-6 shadow-lg">
+          <h3 className="text-xl font-bold mb-2">👁️ Signal Preview</h3>
+          <div className="grid grid-cols-4 gap-4 text-center">
+            <div>
+              <div className="text-3xl font-bold">{preview.total}</div>
+              <div className="text-sm">Total Signals</div>
+            </div>
+            <div>
+              <div className="text-3xl font-bold text-green-600">{preview.long}</div>
+              <div className="text-sm">Long Signals</div>
+            </div>
+            <div>
+              <div className="text-3xl font-bold text-red-600">{preview.short}</div>
+              <div className="text-sm">Short Signals</div>
+            </div>
+            <div>
+              <div className="text-3xl font-bold text-blue-600">
+                {((preview.total / (csvData?.length || 1)) * 100).toFixed(1)}%
+              </div>
+              <div className="text-sm">Signal Rate</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Progress Bar */}
+      {isRunning && (
+        <ProgressBar
+          progress={backtestProgress.progress}
+          tested={backtestProgress.tested}
+          withTrades={backtestProgress.withTrades}
+          timeElapsed={backtestProgress.timeElapsed}
+        />
+      )}
+
+      {/* Backtest Results */}
+      {backtestResult && <StrategyResults result={backtestResult} initialCapital={strategy.risk_management.capital} />}
+
+      {/* Chart Visualization */}
+      {backtestResult && csvData && <StrategyChart ohlcvData={csvData} result={backtestResult} />}
+
+      {/* Edit Indicator Modal */}
+      {editingIndicator && (
+        <IndicatorConfigModal
+          indicator={editingIndicator.config}
+          onSave={saveIndicatorConfig}
+          onCancel={() => setEditingIndicator(null)}
+        />
+      )}
+
+      {/* Save Modal */}
+      {showSaveModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 w-96 shadow-2xl">
+            <h3 className="text-xl font-bold mb-4">💾 Save Strategy</h3>
+            <label className="block text-sm font-bold mb-2">Strategy Name</label>
+            <input
+              type="text"
+              value={strategy.name}
+              onChange={(e) => setStrategy(prev => ({ ...prev, name: e.target.value }))}
+              className="w-full px-4 py-2 border rounded-lg mb-4"
+            />
+            <div className="flex gap-2">
+              <button className="btn-primary flex-1" onClick={saveStrategy}>
+                💾 Save
+              </button>
+              <button className="btn-secondary flex-1" onClick={() => setShowSaveModal(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Load Modal */}
+      {showLoadModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 w-[600px] shadow-2xl max-h-[80vh] overflow-auto">
+            <h3 className="text-xl font-bold mb-4">📂 Load Strategy</h3>
+            {savedStrategies.length === 0 ? (
+              <p className="text-gray-600">No saved strategies</p>
+            ) : (
+              <div className="space-y-2">
+                {savedStrategies.map((item) => (
+                  <div key={item.name} className="flex items-center justify-between p-4 border rounded-lg">
+                    <div className="flex-1">
+                      <div className="font-bold">{item.name}</div>
+                      <div className="text-xs text-gray-600">
+                        {item.description || 'No description'}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        {item.indicator_count} indicators • {item.created_at}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        className="btn-primary text-sm"
+                        onClick={() => loadStrategy(item.name)}
+                      >
+                        Load
+                      </button>
+                      <button
+                        className="btn-danger text-sm"
+                        onClick={() => deleteStrategy(item.name)}
+                      >
+                        ❌
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button
+              className="btn-secondary w-full mt-4"
+              onClick={() => setShowLoadModal(false)}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

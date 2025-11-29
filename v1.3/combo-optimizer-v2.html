@@ -6,6 +6,10 @@
     <title>🎯 Combo Optimizer - Tìm Tổ Hợp Chỉ Báo Tối Ưu</title>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.0/dist/chartjs-chart-financial.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <!-- Indicators generated from Python backend for synchronization -->
     <style>
         * {
@@ -751,7 +755,10 @@
         <div class="chart-section" id="chartSection">
             <div class="chart-header">
                 <div class="chart-title" id="chartTitle">📊 Trade Visualization</div>
-                <button class="chart-close" onclick="closeChart()">✕ Đóng</button>
+                <div style="display: flex; gap: 10px;">
+                    <button class="chart-reset-zoom" onclick="resetChartZoom()" style="background: #3b82f6; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px;">🔍 Reset Zoom</button>
+                    <button class="chart-close" onclick="closeChart()">✕ Đóng</button>
+                </div>
             </div>
 
             <div id="tradingChart"></div>
@@ -1514,91 +1521,109 @@
             const canvas = document.getElementById('priceChart');
             const ctx = canvas.getContext('2d');
 
-            // Prepare data - use indices for chart
-            const sampleData = csvData.slice(0, Math.min(300, csvData.length));
-            const labels = sampleData.map((d, idx) => d.time ? d.time.slice(11, 16) : idx);
+            console.log('📊 Total data points:', csvData.length);
+            console.log('📊 Total trades:', result.tradesList.length);
+            
+            // Prepare candlestick data
+            const candleData = csvData.map(d => ({
+                x: d.time,
+                o: d.open,
+                h: d.high,
+                l: d.low,
+                c: d.close
+            }));
             
             const chartData = {
-                labels: labels,
                 datasets: [
                     {
-                        label: 'Close Price',
-                        data: sampleData.map(d => d.close),
+                        label: 'OHLC',
+                        type: 'candlestick',
+                        data: candleData,
                         borderColor: '#f39c12',
-                        backgroundColor: 'rgba(243, 156, 18, 0.1)',
-                        fill: true,
-                        tension: 0.2,
-                        borderWidth: 2,
-                        pointRadius: 0,
-                        pointHoverRadius: 6,
-                        yAxisID: 'y'
-                    },
-                    {
-                        label: 'High',
-                        data: sampleData.map(d => d.high),
-                        borderColor: '#4ade80',
-                        borderWidth: 1,
-                        borderDash: [5, 5],
-                        fill: false,
-                        pointRadius: 0,
-                        tension: 0.2,
-                        yAxisID: 'y'
-                    },
-                    {
-                        label: 'Low',
-                        data: sampleData.map(d => d.low),
-                        borderColor: '#f87171',
-                        borderWidth: 1,
-                        borderDash: [5, 5],
-                        fill: false,
-                        pointRadius: 0,
-                        tension: 0.2,
+                        color: {
+                            up: '#22c55e',
+                            down: '#ef4444',
+                            unchanged: '#b0b0b0'
+                        },
                         yAxisID: 'y'
                     }
                 ]
             };
 
-            // Add entry markers
+            // Add entry and exit markers using TIME
             if (result.tradesList && result.tradesList.length > 0) {
+                console.log('📊 Processing', result.tradesList.length, 'trades');
+                
                 const longData = [];
                 const shortData = [];
-                const exitData = [];
+                const profitExitData = [];
+                const lossExitData = [];
 
-                result.tradesList.forEach(trade => {
-                    // Find index of entry time
-                    const entryIdx = csvData.findIndex(d => d.time === trade.time);
-                    if (entryIdx !== -1 && entryIdx < sampleData.length) {
-                        const point = { x: entryIdx, y: trade.entry };
+                result.tradesList.forEach((trade, idx) => {
+                    // ENTRY markers
+                    if (trade.time && trade.entry) {
+                        const point = { x: trade.time, y: trade.entry };
                         if (trade.type === 'LONG') {
                             longData.push(point);
-                        } else {
+                            console.log(`🟢 Trade ${idx + 1}: LONG Entry at ${trade.time} @ ${trade.entry}`);
+                        } else if (trade.type === 'SHORT') {
                             shortData.push(point);
+                            console.log(`🔴 Trade ${idx + 1}: SHORT Entry at ${trade.time} @ ${trade.entry}`);
                         }
                     }
 
-                    // Find index of exit time
-                    if (trade.exit && trade.exitTime) {
-                        const exitIdx = csvData.findIndex(d => d.time === trade.exitTime);
-                        if (exitIdx !== -1 && exitIdx < sampleData.length) {
-                            exitData.push({ 
-                                x: exitIdx, 
+                    // EXIT markers
+                    if (trade.exit) {
+                        let exitTime = trade.exitTime;
+                        
+                        // Fallback: find exit time by price if missing
+                        if (!exitTime) {
+                            const entryIdx = csvData.findIndex(d => d.time === trade.time);
+                            if (entryIdx !== -1) {
+                                for (let j = entryIdx + 1; j < csvData.length; j++) {
+                                    const candle = csvData[j];
+                                    if (trade.exit >= candle.low && trade.exit <= candle.high) {
+                                        exitTime = candle.time;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (exitTime) {
+                            const profit = trade.profitPct || trade.profit || 0;
+                            const exitPoint = { 
+                                x: exitTime, 
                                 y: trade.exit,
-                                profit: trade.profitPct,
-                                type: trade.type
-                            });
+                                profit: profit
+                            };
+                            
+                            if (profit > 0) {
+                                profitExitData.push(exitPoint);
+                                console.log(`✅ Trade ${idx + 1}: Exit (Profit) at ${exitTime} @ ${trade.exit} (+${profit.toFixed(2)}%)`);
+                            } else {
+                                lossExitData.push(exitPoint);
+                                console.log(`❌ Trade ${idx + 1}: Exit (Loss) at ${exitTime} @ ${trade.exit} (${profit.toFixed(2)}%)`);
+                            }
                         }
                     }
                 });
+
+                console.log('📊 Summary: LONG:', longData.length, 'SHORT:', shortData.length, 'Profit:', profitExitData.length, 'Loss:', lossExitData.length);
+
+                console.log('📊 Summary: LONG:', longData.length, 'SHORT:', shortData.length, 'Profit:', profitExitData.length, 'Loss:', lossExitData.length);
 
                 if (longData.length > 0) {
                     chartData.datasets.push({
                         label: 'LONG Entry ▲',
                         type: 'scatter',
                         data: longData,
-                        backgroundColor: '#4ade80',
-                        borderColor: '#4ade80',
-                        borderWidth: 2,
-                        pointRadius: 8,
+                        backgroundColor: '#22c55e',
+                        borderColor: '#16a34a',
+                        borderWidth: 3,
+                        pointRadius: 10,
+                        pointStyle: 'triangle',
+                        rotation: 0,
                         showLine: false,
                         yAxisID: 'y'
                     });
@@ -1609,48 +1634,45 @@
                         label: 'SHORT Entry ▼',
                         type: 'scatter',
                         data: shortData,
-                        backgroundColor: '#f87171',
-                        borderColor: '#f87171',
-                        borderWidth: 2,
-                        pointRadius: 8,
+                        backgroundColor: '#ef4444',
+                        borderColor: '#dc2626',
+                        borderWidth: 3,
+                        pointRadius: 10,
+                        pointStyle: 'triangle',
+                        rotation: 180,
                         showLine: false,
                         yAxisID: 'y'
                     });
                 }
 
-                if (exitData.length > 0) {
-                    const profitableExits = exitData.filter(e => e.profit > 0);
-                    const losingExits = exitData.filter(e => e.profit <= 0);
+                if (profitExitData.length > 0) {
+                    chartData.datasets.push({
+                        label: 'Exit (Profit) ✓',
+                        type: 'scatter',
+                        data: profitExitData,
+                        backgroundColor: '#10b981',
+                        borderColor: '#059669',
+                        borderWidth: 3,
+                        pointRadius: 8,
+                        pointStyle: 'rectRot',
+                        showLine: false,
+                        yAxisID: 'y'
+                    });
+                }
 
-                    if (profitableExits.length > 0) {
-                        chartData.datasets.push({
-                            label: 'Exit (Profit) ✓',
-                            type: 'scatter',
-                            data: profitableExits,
-                            backgroundColor: '#10b981',
-                            borderColor: '#10b981',
-                            borderWidth: 2,
-                            pointRadius: 6,
-                            pointStyle: 'circle',
-                            showLine: false,
-                            yAxisID: 'y'
-                        });
-                    }
-
-                    if (losingExits.length > 0) {
-                        chartData.datasets.push({
-                            label: 'Exit (Loss) ✗',
-                            type: 'scatter',
-                            data: losingExits,
-                            backgroundColor: '#dc2626',
-                            borderColor: '#dc2626',
-                            borderWidth: 2,
-                            pointRadius: 6,
-                            pointStyle: 'circle',
-                            showLine: false,
-                            yAxisID: 'y'
-                        });
-                    }
+                if (lossExitData.length > 0) {
+                    chartData.datasets.push({
+                        label: 'Exit (Loss) ✗',
+                        type: 'scatter',
+                        data: lossExitData,
+                        backgroundColor: '#f59e0b',
+                        borderColor: '#d97706',
+                        borderWidth: 3,
+                        pointRadius: 8,
+                        pointStyle: 'rectRot',
+                        showLine: false,
+                        yAxisID: 'y'
+                    });
                 }
             }
 
@@ -1659,9 +1681,9 @@
                 window.priceChart.destroy();
             }
 
-            // Create chart
+            // Create chart with candlestick
             window.priceChart = new Chart(ctx, {
-                type: 'line',
+                type: 'candlestick',
                 data: chartData,
                 options: {
                     responsive: true,
@@ -1679,6 +1701,26 @@
                                 font: { size: 11 }
                             }
                         },
+                        zoom: {
+                            pan: {
+                                enabled: true,
+                                mode: 'x',
+                                modifierKey: 'ctrl'
+                            },
+                            zoom: {
+                                wheel: {
+                                    enabled: true,
+                                    speed: 0.1
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                mode: 'x'
+                            },
+                            limits: {
+                                x: { min: 'original', max: 'original' }
+                            }
+                        },
                         tooltip: {
                             backgroundColor: 'rgba(0, 0, 0, 0.8)',
                             borderColor: '#e94560',
@@ -1687,6 +1729,20 @@
                             bodyColor: '#b0b0b0',
                             padding: 12,
                             callbacks: {
+                                title: function(context) {
+                                    // Format time nicely
+                                    const label = context[0].label;
+                                    if (label && label.includes('T')) {
+                                        const date = new Date(label);
+                                        return date.toLocaleString('en-US', { 
+                                            month: 'short', 
+                                            day: 'numeric', 
+                                            hour: '2-digit', 
+                                            minute: '2-digit' 
+                                        });
+                                    }
+                                    return label;
+                                },
                                 afterLabel: function(context) {
                                     if (context.dataset.label && context.dataset.label.includes('Exit')) {
                                         const data = context.raw;
@@ -1701,6 +1757,14 @@
                     },
                     scales: {
                         x: {
+                            type: 'time',
+                            time: {
+                                unit: 'hour',
+                                displayFormats: {
+                                    hour: 'MMM d, HH:mm'
+                                },
+                                tooltipFormat: 'MMM d, HH:mm'
+                            },
                             ticks: {
                                 color: '#b0b0b0',
                                 maxTicksLimit: 20
@@ -1721,6 +1785,12 @@
                     }
                 }
             });
+        }
+
+        function resetChartZoom() {
+            if (window.priceChart) {
+                window.priceChart.resetZoom();
+            }
         }
 
         function closeChart() {
