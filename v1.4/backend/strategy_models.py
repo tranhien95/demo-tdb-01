@@ -136,6 +136,24 @@ class BacktestResult(BaseModel):
     max_drawdown: float = Field(..., alias='draw_down')
     sharpe_ratio: float = Field(..., alias='sharpe')
     
+    # Advanced Metrics (New)
+    sortino_ratio: Optional[float] = 0.0
+    calmar_ratio: Optional[float] = 0.0
+    recovery_factor: Optional[float] = 0.0
+    expectancy: Optional[float] = 0.0
+    max_consecutive_losses: Optional[int] = 0
+    max_consecutive_wins: Optional[int] = 0
+    profit_per_trade: Optional[float] = 0.0
+    avg_win: Optional[float] = 0.0
+    avg_loss: Optional[float] = 0.0
+    avg_win_pct: Optional[float] = 0.0
+    avg_loss_pct: Optional[float] = 0.0
+    largest_win: Optional[float] = 0.0
+    largest_loss: Optional[float] = 0.0
+    max_drawdown_value: Optional[float] = 0.0
+    drawdown_duration: Optional[int] = 0
+    recovery_duration: Optional[int] = 0
+    
     # Trades
     trades: List[BacktestTrade]
     

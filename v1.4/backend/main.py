@@ -13,6 +13,7 @@ import json
 from typing import List, Dict, Any, Optional
 from itertools import combinations
 from indicators import indicator_manager, get_all_signals, get_pine_script_code
+from performance_metrics import PerformanceMetrics
 
 # Strategy imports
 from strategy_models import (
@@ -259,16 +260,24 @@ class BacktestEngine:
                 profit = current_close - last_trade['entry'] if current_position == 'LONG' else last_trade['entry'] - current_close
                 profit_pct = (profit / last_trade['entry']) * 100
                 
+                # Calculate actual USD profit: position size × profit%
+                # Risk is based on INITIAL capital (100), position = risk / SL%
+                initial_capital = 100
+                risk_amount = initial_capital * (risk_pct / 100)
+                position_size = risk_amount / (sl_pct / 100)
+                actual_profit_usd = position_size * (profit_pct / 100)
+                
                 last_trade['exit'] = round(current_close, 2)
                 last_trade['exit_time'] = ohlcv_data[i].get('time', '')
-                last_trade['profit'] = round(profit, 4)
+                last_trade['profit'] = round(actual_profit_usd, 4)  # USD profit
                 last_trade['profit_pct'] = round(profit_pct, 2)
                 last_trade['exit_reason'] = 'Switch'
                 
                 if profit > 0:
                     wins += 1
                 
-                balance += (profit_pct / 100) * (balance * risk_pct / 100)
+                # Update balance
+                balance += actual_profit_usd
                 max_balance = max(max_balance, balance)
                 min_balance = min(min_balance, balance)
                 
@@ -319,16 +328,23 @@ class BacktestEngine:
                         profit = exit_price - last_trade['entry'] if current_position == 'LONG' else last_trade['entry'] - exit_price
                         profit_pct = (profit / last_trade['entry']) * 100
                         
+                        # Calculate actual USD profit
+                        initial_capital = 100
+                        risk_amount = initial_capital * (risk_pct / 100)
+                        position_size = risk_amount / (sl_pct / 100)
+                        actual_profit_usd = position_size * (profit_pct / 100)
+                        
                         last_trade['exit'] = round(exit_price, 2)
                         last_trade['exit_time'] = ohlcv_data[i].get('time', '')
-                        last_trade['profit'] = round(profit, 4)
+                        last_trade['profit'] = round(actual_profit_usd, 4)  # USD profit
                         last_trade['profit_pct'] = round(profit_pct, 2)
                         last_trade['exit_reason'] = exit_reason
                         
                         if profit > 0:
                             wins += 1
                         
-                        balance += (profit_pct / 100) * (balance * risk_pct / 100)
+                        # Update balance
+                        balance += actual_profit_usd
                         max_balance = max(max_balance, balance)
                         min_balance = min(min_balance, balance)
                         current_position = None
@@ -340,9 +356,15 @@ class BacktestEngine:
                 profit = exit_price - last_trade['entry'] if current_position == 'LONG' else last_trade['entry'] - exit_price
                 profit_pct = (profit / last_trade['entry']) * 100
                 
+                # Calculate actual USD profit
+                initial_capital = 100
+                risk_amount = initial_capital * (risk_pct / 100)
+                position_size = risk_amount / (sl_pct / 100)
+                actual_profit_usd = position_size * (profit_pct / 100)
+                
                 last_trade['exit'] = round(exit_price, 2)
                 last_trade['exit_time'] = ohlcv_data[-1].get('time', '')
-                last_trade['profit'] = round(profit, 4)
+                last_trade['profit'] = round(actual_profit_usd, 4)  # USD profit
                 last_trade['profit_pct'] = round(profit_pct, 2)
                 
                 if profit > 0:
@@ -353,10 +375,18 @@ class BacktestEngine:
         losses = total_trades - wins
         
         win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
-        profit_factor = (wins / (losses or 1)) if losses > 0 else (wins if wins > 0 else 0)
+        
+        # Calculate actual portfolio return (not sum of individual trades)
+        total_profit = ((balance - 100) / 100) * 100  # ROI% from initial 100
+        
+        # Use standardized performance metrics
+        profit_factor = PerformanceMetrics.calculate_profit_factor(completed_trades)
+        
+        # Calculate max drawdown from balance tracking
         draw_down = ((max_balance - min_balance) / max_balance * 100) if max_balance > 0 else 0
         
-        total_profit = sum([t.get('profit_pct', 0) or 0 for t in completed_trades])
+        # Calculate Sharpe ratio properly
+        sharpe = PerformanceMetrics.calculate_sharpe_ratio(completed_trades)
         
         return {
             'combo': ' + '.join(combo),

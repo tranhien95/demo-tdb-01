@@ -10,6 +10,7 @@ from strategy_models import (
 )
 from indicators import indicator_manager
 from indicators.base import HelperFunctions
+from performance_metrics import PerformanceMetrics
 import uuid
 
 
@@ -230,8 +231,10 @@ class StrategyEngine:
                 tp = entry + (entry - sl) * rr_ratio if direction == 'LONG' else entry - (sl - entry) * rr_ratio
                 
                 # Calculate position size
-                risk_amount = balance * (risk_pct / 100)
-                position_size = risk_amount
+                # Risk based on INITIAL capital, not current balance
+                risk_amount = capital * (risk_pct / 100)
+                # Position size = Risk / SL% (standard trading formula)
+                position_size = risk_amount / (sl_pct / 100)
                 position_percent = (position_size / balance) * 100
                 
                 trades_list.append({
@@ -262,16 +265,21 @@ class StrategyEngine:
                 profit = current_close - last_trade['entry'] if current_position == 'LONG' else last_trade['entry'] - current_close
                 profit_pct = (profit / last_trade['entry']) * 100
                 
+                # Calculate actual USD profit based on position size
+                position_size = last_trade['position_size']
+                actual_profit_usd = position_size * (profit_pct / 100)
+                
                 last_trade['exit'] = round(current_close, 2)
                 last_trade['exit_time'] = data[i].get('time', '')
-                last_trade['profit'] = round(profit, 4)
+                last_trade['profit'] = round(actual_profit_usd, 4)  # USD profit, not price diff
                 last_trade['profit_pct'] = round(profit_pct, 2)
                 last_trade['exit_reason'] = 'Switch'
                 
                 if profit > 0:
                     wins += 1
                 
-                balance += (profit_pct / 100) * (balance * risk_pct / 100)
+                # Update balance with actual profit
+                balance += actual_profit_usd
                 max_balance = max(max_balance, balance)
                 min_balance = min(min_balance, balance)
                 equity_curve.append(round(balance, 2))
@@ -282,8 +290,10 @@ class StrategyEngine:
                 tp = entry + (entry - sl) * rr_ratio if direction == 'LONG' else entry - (sl - entry) * rr_ratio
                 
                 # Calculate position size
-                risk_amount = balance * (risk_pct / 100)
-                position_size = risk_amount
+                # Risk based on INITIAL capital, not current balance
+                risk_amount = capital * (risk_pct / 100)
+                # Position size = Risk / SL% (standard trading formula)
+                position_size = risk_amount / (sl_pct / 100)
                 position_percent = (position_size / balance) * 100
                 
                 trades_list.append({
@@ -334,16 +344,21 @@ class StrategyEngine:
                         profit = exit_price - last_trade['entry'] if current_position == 'LONG' else last_trade['entry'] - exit_price
                         profit_pct = (profit / last_trade['entry']) * 100
                         
+                        # Calculate actual USD profit based on position size
+                        position_size = last_trade['position_size']
+                        actual_profit_usd = position_size * (profit_pct / 100)
+                        
                         last_trade['exit'] = round(exit_price, 2)
                         last_trade['exit_time'] = data[i].get('time', '')
-                        last_trade['profit'] = round(profit, 4)
+                        last_trade['profit'] = round(actual_profit_usd, 4)  # USD profit, not price diff
                         last_trade['profit_pct'] = round(profit_pct, 2)
                         last_trade['exit_reason'] = exit_reason
                         
                         if profit > 0:
                             wins += 1
                         
-                        balance += (profit_pct / 100) * (balance * risk_pct / 100)
+                        # Update balance with actual profit
+                        balance += actual_profit_usd
                         max_balance = max(max_balance, balance)
                         min_balance = min(min_balance, balance)
                         equity_curve.append(round(balance, 2))
@@ -357,9 +372,13 @@ class StrategyEngine:
                 profit = exit_price - last_trade['entry'] if current_position == 'LONG' else last_trade['entry'] - exit_price
                 profit_pct = (profit / last_trade['entry']) * 100
                 
+                # Calculate actual USD profit based on position size
+                position_size = last_trade['position_size']
+                actual_profit_usd = position_size * (profit_pct / 100)
+                
                 last_trade['exit'] = round(exit_price, 2)
                 last_trade['exit_time'] = data[-1].get('time', '')
-                last_trade['profit'] = round(profit, 4)
+                last_trade['profit'] = round(actual_profit_usd, 4)  # USD profit, not price diff
                 last_trade['profit_pct'] = round(profit_pct, 2)
                 last_trade['exit_reason'] = 'Close'
                 
@@ -371,16 +390,19 @@ class StrategyEngine:
         total_trades = len(completed_trades)
         losses = total_trades - wins
         
-        # Calculate profit factor correctly
-        gross_profit = sum([t.get('profit', 0) for t in completed_trades if t.get('profit', 0) > 0])
-        gross_loss = abs(sum([t.get('profit', 0) for t in completed_trades if t.get('profit', 0) < 0]))
-        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else (gross_profit if gross_profit > 0 else 0)
-        
         win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
-        draw_down = ((max_balance - min_balance) / max_balance * 100) if max_balance > 0 else 0
-        total_profit_pct = sum([t.get('profit_pct', 0) or 0 for t in completed_trades])
-        total_profit_usd = sum([t.get('profit', 0) or 0 for t in completed_trades])  # Sum all profits
-        sharpe = round(total_profit_pct / max(draw_down, 1), 2) if total_profit_pct != 0 else 0
+        
+        # Calculate actual portfolio return
+        final_balance = equity_curve[-1] if equity_curve else capital
+        total_profit_pct = ((final_balance - capital) / capital) * 100
+        total_profit_usd = final_balance - capital
+        
+        # Calculate all performance metrics using standardized calculator
+        all_metrics = PerformanceMetrics.calculate_all_metrics(
+            trades=completed_trades,
+            equity_curve=equity_curve,
+            initial_capital=capital
+        )
         
         return BacktestResult(
             strategy_name=strategy.name,
@@ -390,9 +412,25 @@ class StrategyEngine:
             win_rate=round(win_rate, 2),
             profit_pct=round(total_profit_pct, 2),
             total_profit_usd=round(total_profit_usd, 2),
-            profit_factor=round(profit_factor, 2),
-            draw_down=round(draw_down, 2),
-            sharpe=sharpe,
+            profit_factor=all_metrics['profit_factor'],
+            draw_down=all_metrics['max_drawdown_pct'],
+            sharpe=all_metrics['sharpe_ratio'],
+            sortino_ratio=all_metrics['sortino_ratio'],
+            calmar_ratio=all_metrics['calmar_ratio'],
+            recovery_factor=all_metrics['recovery_factor'],
+            expectancy=all_metrics['expectancy'],
+            max_consecutive_losses=all_metrics['max_consecutive_losses'],
+            max_consecutive_wins=all_metrics['max_consecutive_wins'],
+            profit_per_trade=all_metrics['profit_per_trade'],
+            avg_win=all_metrics['avg_win'],
+            avg_loss=all_metrics['avg_loss'],
+            avg_win_pct=all_metrics['avg_win_pct'],
+            avg_loss_pct=all_metrics['avg_loss_pct'],
+            largest_win=all_metrics['largest_win'],
+            largest_loss=all_metrics['largest_loss'],
+            max_drawdown_value=all_metrics['max_drawdown_value'],
+            drawdown_duration=all_metrics['drawdown_duration'],
+            recovery_duration=all_metrics['recovery_duration'],
             trades=[BacktestTrade(**t) for t in completed_trades[-200:]],
             total_signals=total_signals,
             long_signals=long_signals,
