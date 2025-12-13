@@ -48,6 +48,7 @@ lerna-debug.log*
 dist/
 build/
 *.local
+.vite/
 
 # Database
 *.db
@@ -154,4 +155,13 @@ dmypy.json
 
 # Cython
 cython_debug/
+
+# Vite cache
+.vite/
+
+# Lock files (optional - some teams prefer to commit these)
+# Uncomment if you want to ignore lock files
+# pnpm-lock.yaml
+# package-lock.json
+# yarn.lock
 
