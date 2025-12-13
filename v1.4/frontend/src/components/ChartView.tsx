@@ -38,15 +38,54 @@ export const ChartView: React.FC = () => {
       wickDownColor: '#ef4444',
     })
 
-    const chartData: CandlestickData<Time>[] = csvData.map(d => ({
-      time: (new Date(d.time).getTime() / 1000) as Time,
-      open: d.open,
-      high: d.high,
-      low: d.low,
-      close: d.close,
-    }))
+    // Format OHLCV data and convert to Unix timestamps
+    const chartData: CandlestickData<Time>[] = csvData.map(d => {
+      // Convert time to Unix timestamp (seconds)
+      let timeValue: number
+      if (typeof d.time === 'string') {
+        timeValue = Math.floor(new Date(d.time).getTime() / 1000)
+      } else {
+        // Already a number, assume it's Unix timestamp
+        // If it's in milliseconds (> 10000000000), convert to seconds
+        timeValue = d.time > 10000000000 ? Math.floor(d.time / 1000) : d.time
+      }
+      
+      return {
+        time: timeValue as Time,
+        open: d.open,
+        high: d.high,
+        low: d.low,
+        close: d.close,
+      }
+    })
 
-    candlestickSeries.setData(chartData)
+    // Sort by time ascending FIRST (required by lightweight-charts)
+    chartData.sort((a, b) => {
+      const timeA = a.time as number
+      const timeB = b.time as number
+      return timeA - timeB
+    })
+
+    // Remove duplicates by time (keep first occurrence) and ensure ascending order
+    const uniqueChartData: CandlestickData<Time>[] = []
+    const seenTimes = new Set<number>()
+    
+    for (const candle of chartData) {
+      const timeNum = candle.time as number
+      if (!seenTimes.has(timeNum)) {
+        seenTimes.add(timeNum)
+        uniqueChartData.push(candle)
+      }
+    }
+
+    // Final sort to ensure ascending order (should already be sorted, but double-check)
+    uniqueChartData.sort((a, b) => {
+      const timeA = a.time as number
+      const timeB = b.time as number
+      return timeA - timeB
+    })
+
+    candlestickSeries.setData(uniqueChartData)
 
     // Add markers for trades
     const markers = selectedCombo.trades_list.flatMap(trade => {

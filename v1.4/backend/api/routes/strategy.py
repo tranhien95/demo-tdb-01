@@ -3,8 +3,9 @@ Strategy Routes
 Endpoints for strategy management and backtesting
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Body
 from pydantic import ValidationError
+from typing import Optional, Dict, Any
 from indicators import indicator_manager
 from strategy_models import Strategy, BacktestRequest
 from strategy_engine import StrategyEngine
@@ -202,8 +203,19 @@ async def delete_strategy(name: str):
 
 @router.post("/export-pine")
 @handle_exceptions
-async def export_pine_script(strategy: Strategy):
-    """Export strategy to Pine Script"""
-    result = pine_script_generator.generate(strategy)
+async def export_pine_script(
+    strategy: Strategy = Body(...),
+    backtest_result: Optional[Dict[str, Any]] = Body(None),
+    version: Optional[str] = Body(None)
+):
+    """
+    Export strategy to Pine Script
+    
+    Args:
+        strategy: Strategy object with indicators, filters, and risk management
+        backtest_result: Optional backtest results to include in header
+        version: Optional strategy version (defaults to "1.0.0")
+    """
+    result = pine_script_generator.generate(strategy, backtest_result, version)
     return result.model_dump()
 

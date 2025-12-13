@@ -51,6 +51,21 @@ class BinanceFetcher:
         """Trả về danh sách timeframe khả dụng"""
         return self.timeframe_map
     
+    def _get_timeframe_ms(self, timeframe: str) -> int:
+        """Convert timeframe to milliseconds"""
+        # Map timeframe to milliseconds
+        timeframe_ms_map = {
+            '1m': 60 * 1000,
+            '5m': 5 * 60 * 1000,
+            '15m': 15 * 60 * 1000,
+            '30m': 30 * 60 * 1000,
+            '1h': 60 * 60 * 1000,
+            '4h': 4 * 60 * 60 * 1000,
+            '1d': 24 * 60 * 60 * 1000,
+            '1w': 7 * 24 * 60 * 60 * 1000,
+        }
+        return timeframe_ms_map.get(timeframe, 15 * 60 * 1000)  # Default to 15m
+    
     def fetch_ohlcv(
         self,
         symbol: str,
@@ -89,8 +104,11 @@ class BinanceFetcher:
                 remaining = limit
                 since = None  # Start from latest (None = most recent)
                 fetched_count = 0
+                max_iterations = 10  # Prevent infinite loops
+                iteration = 0
                 
-                while remaining > 0 and fetched_count < limit:
+                while remaining > 0 and fetched_count < limit and iteration < max_iterations:
+                    iteration += 1
                     fetch_limit = min(remaining, max_per_request)
                     
                     try:
@@ -103,37 +121,69 @@ class BinanceFetcher:
                             ohlcv_data = self.exchange.fetch_ohlcv(symbol, tf, limit=fetch_limit)
                         
                         if not ohlcv_data or len(ohlcv_data) == 0:
+                            print(f"[BinanceFetcher] No more data available. Fetched {fetched_count}/{limit}")
                             break
                         
                         # Binance returns oldest first when using 'since', newest first when not
                         # We want oldest first, so prepend when using 'since', append when not
                         if since:
                             # Prepend older data (already oldest first)
-                            all_candles = ohlcv_data + all_candles
+                            # Remove duplicates based on timestamp to avoid overlap
+                            existing_timestamps = {c[0] for c in all_candles} if all_candles else set()
+                            new_candles = [c for c in ohlcv_data if c[0] not in existing_timestamps]
+                            if len(new_candles) < len(ohlcv_data):
+                                print(f"[BinanceFetcher] Removed {len(ohlcv_data) - len(new_candles)} duplicate candles")
+                            all_candles = new_candles + all_candles
+                            ohlcv_data = new_candles  # Update for count calculation
                         else:
                             # First fetch: reverse to get oldest first, then prepend
                             ohlcv_data.reverse()
                             all_candles = ohlcv_data + all_candles
                         
-                        # Get oldest timestamp for next fetch (go back in time)
-                        oldest_timestamp = all_candles[0][0]  # First item is oldest
-                        since = oldest_timestamp - 1  # Fetch before this timestamp
-                        
                         fetched_count += len(ohlcv_data)
-                        remaining -= len(ohlcv_data)
+                        remaining = limit - fetched_count
                         
-                        # Prevent infinite loop
-                        if len(ohlcv_data) < fetch_limit:
+                        # Get oldest timestamp for next fetch (go back in time)
+                        if len(all_candles) > 0:
+                            oldest_timestamp = all_candles[0][0]  # First item is oldest
+                            # Use oldest_timestamp - 1ms to fetch next batch
+                            # This ensures we don't miss any candles (duplicates will be removed)
+                            since = oldest_timestamp - 1
+                            
+                            print(f"[BinanceFetcher] Iteration {iteration}: Fetched {len(ohlcv_data)} candles. Total: {len(all_candles)}. Oldest timestamp: {oldest_timestamp}, Next since: {since}")
+                        else:
                             break
+                        
+                        # If we got less than requested, check if we need to continue
+                        if len(ohlcv_data) < fetch_limit:
+                            print(f"[BinanceFetcher] Got {len(ohlcv_data)} candles, less than requested {fetch_limit}. Remaining: {remaining}")
+                            # If we still need more and got some data, continue
+                            if remaining > 0 and len(ohlcv_data) > 0:
+                                # Continue fetching if we got some data but not enough
+                                continue
+                            elif len(ohlcv_data) == 0:
+                                # No more data available
+                                print(f"[BinanceFetcher] No more data available from Binance")
+                                break
+                            else:
+                                # We got all available data
+                                break
+                                
                     except Exception as e:
-                        print(f"Error in multi-fetch: {e}")
+                        print(f"[BinanceFetcher] Error in multi-fetch iteration {iteration}: {e}")
                         break
                 
                 # Take only requested amount (oldest N candles)
-                all_candles = all_candles[:limit]
+                if len(all_candles) > limit:
+                    all_candles = all_candles[:limit]
+                elif len(all_candles) < limit:
+                    print(f"[BinanceFetcher] Warning: Only fetched {len(all_candles)} candles out of {limit} requested")
             
             if not all_candles:
                 return None
+            
+            # Sort by timestamp to ensure ascending order (oldest first)
+            all_candles.sort(key=lambda x: x[0])
             
             # Convert to standard format
             result = []

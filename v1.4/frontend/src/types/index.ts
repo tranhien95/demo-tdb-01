@@ -185,4 +185,7 @@ export interface StrategyListItem {
 export interface PineScriptExport {
   code: string
   strategy_name: string
+  indicators_used?: string[]
+  version?: string
+  backtest_info?: any
 }

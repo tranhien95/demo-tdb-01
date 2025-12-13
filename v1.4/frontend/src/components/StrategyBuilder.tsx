@@ -240,18 +240,26 @@ export const StrategyBuilder: React.FC = () => {
 
   const exportPineScript = async () => {
     try {
-      const result = await strategyAPI.exportPineScript(strategy)
+      // Get version from strategy name or use default
+      const version = '1.0.0' // Can be enhanced to get from strategy metadata
+      
+      // Include backtest result if available
+      const result = await strategyAPI.exportPineScript(
+        strategy, 
+        backtestResult, 
+        version
+      )
       
       // Download as file
       const blob = new Blob([result.code], { type: 'text/plain' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${result.strategy_name}.pine`
+      a.download = `${result.strategy_name}_v${result.version || '1.0.0'}.pine`
       a.click()
       URL.revokeObjectURL(url)
       
-      alert('✅ Đã export Pine Script!')
+      alert('✅ Đã export Pine Script với version và backtest results!')
     } catch (error) {
       alert('❌ Export failed: ' + (error as Error).message)
     }

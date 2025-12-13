@@ -178,3 +178,5 @@ class PineScriptExport(BaseModel):
     code: str
     strategy_name: str
     indicators_used: List[str]
+    version: Optional[str] = "1.0.0"  # Strategy version
+    backtest_info: Optional[Dict[str, Any]] = None  # Backtest results if available

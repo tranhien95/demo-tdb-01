@@ -12,7 +12,7 @@ from api.models import OptimizationParams
 from api.backtest_engine import BacktestEngine
 from api.exceptions import ValidationException, InternalServerException
 from api.decorators import handle_exceptions
-from indicators import get_pine_script_code
+from indicators import indicator_manager, get_pine_script_code
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -37,12 +37,8 @@ async def optimize_stream(request: Request):
         try:
             data = [d.model_dump() for d in params.ohlcv_data]
             
-            indicators = [
-                'RSI', 'MACD', 'Stochastic', 'Bollinger_Bands',
-                'Volume_MA', 'EMA_50', 'EMA_200', 'EMA_12', 'EMA_26',
-                'ADX', 'CCI', 'MFI', 'ROC', 'VROC', 'RVI', 'Donchian',
-                'Awesome_Oscillator', 'Momentum', 'ATR', 'Pivot_Points', 'OBV', 'SuperTrend'
-            ]
+            # Use same indicator list as Strategy Builder (from indicator_manager)
+            indicators = indicator_manager.list_indicators()
             
             combos = []
             for size in range(params.min_combo_size, params.max_combo_size + 1):
@@ -95,14 +91,51 @@ async def optimize_stream(request: Request):
 @router.post("/generate-pine-script")
 @handle_exceptions
 async def generate_pine_script(indicators: list[str]):
-    """Generate Pine Script code from indicator list"""
+    """Generate Pine Script code from indicator list (full strategy with signal logic)"""
     if not indicators:
         raise ValidationException("Indicators list cannot be empty")
     
-    code = get_pine_script_code(indicators)
-    return {
-        'status': 'success',
-        'code': code,
-        'indicators': indicators
-    }
+    from strategy_models import Strategy, IndicatorConfig, SignalLogic, FilterConfig, RiskManagement
+    from pine_script_generator import pine_script_generator
+    
+    # Create a temporary strategy from indicators
+    indicator_configs = [
+        IndicatorConfig(
+            type=ind,
+            config={},
+            weight=1.0,
+            enabled=True
+        )
+        for ind in indicators
+    ]
+    
+    strategy = Strategy(
+        name="Optimized Combo",
+        description=f"Auto-generated from combo: {' + '.join(indicators)}",
+        indicators=indicator_configs,
+        signal_logic=SignalLogic(threshold_percent=70),
+        filters=FilterConfig(),
+        risk_management=RiskManagement(
+            risk_percent=10.0,
+            reward_ratio=1.0,
+            stop_loss_percent=5.0,
+            capital=1000
+        )
+    )
+    
+    # Generate full strategy code
+    try:
+        result = pine_script_generator.generate(strategy)
+        
+        logger.info(f"Generated full strategy code for {len(indicators)} indicators, code length: {len(result.code)}")
+        
+        return {
+            'status': 'success',
+            'code': result.code,
+            'indicators': indicators,
+            'strategy_name': result.strategy_name
+        }
+    except Exception as e:
+        logger.error(f"Error generating Pine Script: {str(e)}", exc_info=True)
+        raise InternalServerException(f"Failed to generate Pine Script: {str(e)}")
 

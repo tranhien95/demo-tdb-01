@@ -156,30 +156,9 @@ class BacktestEngine:
         
         all_signals = BacktestEngine._get_or_compute_signals(ohlcv_data)
         
-        indicator_map = {
-            'RSI': 'RSI',
-            'MACD': 'MACD',
-            'Stochastic': 'Stochastic',
-            'Bollinger_Bands': 'Bollinger_Bands',
-            'Volume_MA': 'Volume_MA',
-            'EMA_50': 'EMA_50',
-            'EMA_200': 'EMA_200',
-            'EMA_12': 'EMA_12',
-            'EMA_26': 'EMA_26',
-            'ADX': 'ADX',
-            'CCI': 'CCI',
-            'MFI': 'MFI',
-            'ROC': 'ROC',
-            'VROC': 'VROC',
-            'RVI': 'RVI',
-            'Donchian': 'Donchian',
-            'Awesome_Oscillator': 'Awesome_Oscillator',
-            'Momentum': 'Momentum',
-            'ATR': 'ATR',
-            'Pivot_Points': 'Pivot_Points',
-            'OBV': 'OBV',
-            'SuperTrend': 'SuperTrend'
-        }
+        # Dynamic indicator map from indicator_manager (same as Strategy Builder)
+        available_indicators = indicator_manager.list_indicators()
+        indicator_map = {ind: ind for ind in available_indicators}
         
         for i in range(50, len(ohlcv_data) - 1):
             all_candle_signals = all_signals[i]
@@ -552,12 +531,8 @@ async def optimize_stream(request: Request):
         try:
             data = [d.dict() for d in params.ohlcv_data]
             
-            indicators = [
-                'RSI', 'MACD', 'Stochastic', 'Bollinger_Bands',
-                'Volume_MA', 'EMA_50', 'EMA_200', 'EMA_12', 'EMA_26',
-                'ADX', 'CCI', 'MFI', 'ROC', 'VROC', 'RVI', 'Donchian',
-                'Awesome_Oscillator', 'Momentum', 'ATR', 'Pivot_Points', 'OBV', 'SuperTrend'
-            ]
+            # Use same indicator list as Strategy Builder (from indicator_manager)
+            indicators = indicator_manager.list_indicators()
             
             combos = []
             for size in range(params.min_combo_size, params.max_combo_size + 1):
@@ -609,16 +584,53 @@ async def optimize_stream(request: Request):
 
 @app.post("/generate-pine-script")
 async def generate_pine_script(indicators: List[str]):
-    """Generate Pine Script code from indicator list"""
+    """Generate Pine Script code from indicator list (full strategy with signal logic)"""
     try:
-        code = get_pine_script_code(indicators)
+        from strategy_models import Strategy, IndicatorConfig, SignalLogic, FilterConfig, RiskManagement
+        
+        # Create a temporary strategy from indicators
+        indicator_configs = [
+            IndicatorConfig(
+                type=ind,
+                config={},
+                weight=1.0,
+                enabled=True
+            )
+            for ind in indicators
+        ]
+        
+        strategy = Strategy(
+            name="Optimized Combo",
+            description=f"Auto-generated from combo: {' + '.join(indicators)}",
+            indicators=indicator_configs,
+            signal_logic=SignalLogic(threshold_percent=70),
+            filters=FilterConfig(),
+            risk_management=RiskManagement(
+                risk_percent=10.0,
+                reward_ratio=1.0,
+                stop_loss_percent=5.0,
+                capital=1000
+            )
+        )
+        
+        # Generate full strategy code
+        result = pine_script_generator.generate(strategy)
+        
+        print(f"[generate-pine-script] Generated full strategy code for {len(indicators)} indicators")
+        print(f"[generate-pine-script] Code length: {len(result.code)} characters")
+        
         return {
             'status': 'success',
-            'code': code,
-            'indicators': indicators
+            'code': result.code,
+            'indicators': indicators,
+            'strategy_name': result.strategy_name
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        error_msg = f"Error generating Pine Script: {str(e)}"
+        print(f"[generate-pine-script] ERROR: {error_msg}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=error_msg)
 
 
 # ======================== STRATEGY BUILDER ENDPOINTS ========================
@@ -821,11 +833,15 @@ async def delete_strategy(name: str):
 
 
 @app.post("/api/strategy/export-pine")
-async def export_pine_script(strategy: Strategy):
-    """Export strategy to Pine Script"""
+async def export_pine_script(
+    strategy: Strategy,
+    backtest_result: Optional[Dict[str, Any]] = None,
+    version: Optional[str] = None
+):
+    """Export strategy to Pine Script with optional backtest results and version"""
     try:
-        result = pine_script_generator.generate(strategy)
-        return result.dict()
+        result = pine_script_generator.generate(strategy, backtest_result, version)
+        return result.model_dump()
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -846,13 +862,8 @@ class OptimizeStrategyRequest(BaseModel):
 async def optimize_strategy(request: OptimizeStrategyRequest):
     """Optimize strategy by testing all indicator combinations - similar to Combo Optimizer"""
     try:
-        # Use same indicator list as Combo Optimizer
-        indicators = [
-            'RSI', 'MACD', 'Stochastic', 'Bollinger_Bands',
-            'Volume_MA', 'EMA_50', 'EMA_200', 'EMA_12', 'EMA_26',
-            'ADX', 'CCI', 'MFI', 'ROC', 'VROC', 'RVI', 'Donchian',
-            'Awesome_Oscillator', 'Momentum', 'ATR', 'Pivot_Points', 'OBV', 'SuperTrend'
-        ]
+        # Use same indicator list as Strategy Builder (from indicator_manager)
+        indicators = indicator_manager.list_indicators()
         
         print(f"[STRATEGY OPTIMIZE] Testing with {len(indicators)} indicators, combo_size={request.combo_size}")
         

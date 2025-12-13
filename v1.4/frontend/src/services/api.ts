@@ -145,11 +145,19 @@ export const strategyAPI = {
     return response.json()
   },
 
-  async exportPineScript(strategy: Strategy): Promise<PineScriptExport> {
+  async exportPineScript(
+    strategy: Strategy, 
+    backtestResult?: BacktestResult, 
+    version?: string
+  ): Promise<PineScriptExport> {
     const response = await fetch(`${API_BASE}/api/strategy/export-pine`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(strategy)
+      body: JSON.stringify({
+        strategy,
+        backtest_result: backtestResult || null,
+        version: version || null
+      })
     })
     if (!response.ok) throw new Error('Export failed')
     return response.json()
