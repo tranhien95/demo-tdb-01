@@ -26,8 +26,8 @@ export const StrategyResults: React.FC<Props> = ({ result, initialCapital }) => 
 
   const tradesCount = result.trades?.length || 0
   const signalsCount = result.signals?.length || 0
-  const totalProfitUsd = result.total_profit_usd || 0
-  const totalProfitPct = result.profit_pct || 0
+  const totalProfitUsd = result.total_profit || result.total_profit_usd || 0
+  const totalProfitPct = result.total_profit_pct || result.profit_pct || 0
   const longTrades = result.long_trades || 0
   const shortTrades = result.short_trades || 0
 

@@ -153,6 +153,58 @@ export const strategyAPI = {
     })
     if (!response.ok) throw new Error('Export failed')
     return response.json()
+  },
+
+  async optimizeStrategy(request: {
+    ohlcv_data: any[]
+    combo_size: number
+    max_combos?: number
+    filters: any
+    risk_management: any
+  }): Promise<{
+    total_results: number
+    total_tested: number
+    top_combos: any[]
+  }> {
+    const response = await fetch(`${API_BASE}/api/strategy/optimize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request)
+    })
+    if (!response.ok) throw new Error('Optimization failed')
+    return response.json()
   }
 }
+
+// Binance API
+export const binanceAPI = {
+  async getSymbols(): Promise<{ symbols: string[] }> {
+    const response = await fetch(`${API_BASE}/api/binance/symbols`)
+    if (!response.ok) throw new Error('Failed to fetch symbols')
+    return response.json()
+  },
+
+  async getTimeframes(): Promise<{ timeframes: Record<string, string> }> {
+    const response = await fetch(`${API_BASE}/api/binance/timeframes`)
+    if (!response.ok) throw new Error('Failed to fetch timeframes')
+    return response.json()
+  },
+
+  async fetchData(symbol: string, timeframe: string, limit: number = 200) {
+    const response = await fetch(`${API_BASE}/api/binance/fetch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol, timeframe, limit })
+    })
+    if (!response.ok) throw new Error(`Failed to fetch ${symbol} data`)
+    return response.json()
+  },
+
+  async getSymbolInfo(symbol: string) {
+    const response = await fetch(`${API_BASE}/api/binance/symbol-info/${encodeURIComponent(symbol)}`)
+    if (!response.ok) throw new Error('Failed to fetch symbol info')
+    return response.json()
+  }
+}
+
 

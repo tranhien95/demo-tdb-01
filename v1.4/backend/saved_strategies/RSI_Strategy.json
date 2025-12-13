@@ -1,0 +1,35 @@
+{
+  "name": "RSI_Strategy",
+  "description": "Simple RSI-based strategy - enters when oversold/overbought, exits on reversal",
+  "indicators": [
+    {
+      "type": "rsi",
+      "id": "rsi_14",
+      "enabled": true,
+      "params": {
+        "period": 14
+      },
+      "bullish": true,
+      "bearish": true
+    }
+  ],
+  "signal_logic": {
+    "long_conditions": [
+      "rsi_14 < 30"
+    ],
+    "short_conditions": [
+      "rsi_14 > 70"
+    ]
+  },
+  "filters": {
+    "adx_filter": false,
+    "volume_filter": false,
+    "ma_filter": false
+  },
+  "risk_management": {
+    "position_size_percent": 2.0,
+    "stop_loss_percent": 1.5,
+    "take_profit_percent": 2.0,
+    "max_positions": 1
+  }
+}

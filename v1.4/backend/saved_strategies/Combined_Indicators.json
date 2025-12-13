@@ -1,0 +1,57 @@
+{
+  "name": "Combined_Indicators",
+  "description": "Multi-indicator strategy combining RSI, MACD, and EMA",
+  "indicators": [
+    {
+      "type": "rsi",
+      "id": "rsi_14",
+      "enabled": true,
+      "params": {
+        "period": 14
+      },
+      "bullish": true,
+      "bearish": true
+    },
+    {
+      "type": "macd",
+      "id": "macd_12_26_9",
+      "enabled": true,
+      "params": {
+        "fast_period": 12,
+        "slow_period": 26,
+        "signal_period": 9
+      },
+      "bullish": true,
+      "bearish": true
+    },
+    {
+      "type": "ema",
+      "id": "ema_50",
+      "enabled": true,
+      "params": {
+        "period": 50
+      },
+      "bullish": true,
+      "bearish": true
+    }
+  ],
+  "signal_logic": {
+    "long_conditions": [
+      "rsi_14 < 50 AND macd_12_26_9_histogram > 0"
+    ],
+    "short_conditions": [
+      "rsi_14 > 50 AND macd_12_26_9_histogram < 0"
+    ]
+  },
+  "filters": {
+    "adx_filter": false,
+    "volume_filter": false,
+    "ma_filter": false
+  },
+  "risk_management": {
+    "position_size_percent": 1.5,
+    "stop_loss_percent": 2.0,
+    "take_profit_percent": 3.0,
+    "max_positions": 2
+  }
+}

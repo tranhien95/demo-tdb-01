@@ -24,11 +24,74 @@ class EMAIndicator(BaseIndicator):
         ema_vals = HelperFunctions.ema(closes, period)
         ema_val = ema_vals[index] if ema_vals[index] is not None else data[index]["close"]
         
+        current_price = data[index]["close"]
+        distance_percent = abs(current_price - ema_val) / ema_val * 100
+        
+        # Calculate EMA slope
+        slope = 0
+        if index > 0:
+            prev_ema = ema_vals[index - 1] if ema_vals[index - 1] is not None else data[index - 1]["close"]
+            slope = ((ema_val - prev_ema) / prev_ema * 100) if prev_ema > 0 else 0
+        
+        # Determine signal type based on distance and slope
+        if current_price > ema_val:
+            if distance_percent > 3:
+                signal_type = "STRONG_BUY" if slope > 0 else "BUY"
+            elif distance_percent > 1:
+                signal_type = "BUY"
+            else:
+                signal_type = "NEUTRAL"
+        elif current_price < ema_val:
+            if distance_percent > 3:
+                signal_type = "STRONG_SELL" if slope < 0 else "SELL"
+            elif distance_percent > 1:
+                signal_type = "SELL"
+            else:
+                signal_type = "NEUTRAL"
+        else:
+            signal_type = "NEUTRAL"
+        
+        # Check for crossover (reversal signal)
+        crossover = False
+        if index > 0:
+            prev_price = data[index - 1]["close"]
+            prev_ema = ema_vals[index - 1] if ema_vals[index - 1] is not None else data[index - 1]["close"]
+            crossover = (prev_price <= prev_ema and current_price > ema_val) or (prev_price >= prev_ema and current_price < ema_val)
+        
+        # Trend classification
+        trend = "UPTREND" if current_price > ema_val else ("DOWNTREND" if current_price < ema_val else "NEUTRAL")
+        
+        # Check for slope flattening (potential reversal)
+        slope_flattening = False
+        if index > 2:
+            prev_slope = ((ema_vals[index - 1] - ema_vals[index - 2]) / ema_vals[index - 2] * 100) if ema_vals[index - 2] else 0
+            slope_flattening = abs(slope) < abs(prev_slope) * 0.5
+        
+        confidence = min(distance_percent, 100)
+        
         return {
-            "bullish": data[index]["close"] > ema_val,
-            "bearish": data[index]["close"] < ema_val,
+            "bullish": current_price > ema_val,
+            "bearish": current_price < ema_val,
             "value": ema_val,
-            "strength": abs(data[index]["close"] - ema_val) / ema_val * 100
+            "strength": confidence,
+            "signal_type": signal_type,
+            "confidence": confidence,
+            "trend": trend,
+            "reversal_signal": crossover,
+            "divergence": slope_flattening,
+            "supporting_signals": [
+                f"Price: {current_price:.2f}",
+                f"EMA{period}: {ema_val:.2f}",
+                f"Distance: {distance_percent:.2f}% ({'above' if current_price > ema_val else 'below'})",
+                f"Slope: {slope:+.4f}% {'(increasing)' if slope > 0 else '(decreasing)' if slope < 0 else '(flat)'}"  + (" - Trend possible reversal" if slope_flattening else "")
+            ],
+            "raw_values": {
+                "ema_value": ema_val,
+                "ema_slope": slope,
+                "distance_percent": distance_percent,
+                "price_above_ema": current_price > ema_val,
+                "slope_direction": "up" if slope > 0 else ("down" if slope < 0 else "flat")
+            }
         }
     
     def get_pine_script(self) -> str:

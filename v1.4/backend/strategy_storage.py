@@ -9,6 +9,9 @@ from typing import List, Optional
 from datetime import datetime
 from strategy_models import Strategy, StrategyListItem
 from pathlib import Path
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class StrategyStorage:
@@ -40,11 +43,12 @@ class StrategyStorage:
             
             # Save to file
             with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(strategy.dict(), f, indent=2, default=str)
+                json.dump(strategy.model_dump(), f, indent=2, default=str)
             
+            logger.info(f"Strategy saved: {strategy.name}")
             return True
         except Exception as e:
-            print(f"Error saving strategy: {e}")
+            logger.error(f"Error saving strategy '{strategy.name}': {e}", exc_info=True)
             return False
     
     def load_strategy(self, name: str) -> Optional[Strategy]:
@@ -67,9 +71,10 @@ class StrategyStorage:
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
+            logger.info(f"Strategy loaded: {name}")
             return Strategy(**data)
         except Exception as e:
-            print(f"Error loading strategy: {e}")
+            logger.error(f"Error loading strategy '{name}': {e}", exc_info=True)
             return None
     
     def list_strategies(self) -> List[StrategyListItem]:
@@ -95,10 +100,10 @@ class StrategyStorage:
                         updated_at=datetime.fromisoformat(data.get('updated_at', datetime.now().isoformat()))
                     ))
                 except Exception as e:
-                    print(f"Error reading {filepath}: {e}")
+                    logger.warning(f"Error reading strategy file {filepath.name}: {e}")
                     continue
         except Exception as e:
-            print(f"Error listing strategies: {e}")
+            logger.error(f"Error listing strategies: {e}", exc_info=True)
         
         # Sort by updated_at desc
         strategies.sort(key=lambda x: x.updated_at, reverse=True)
@@ -120,10 +125,11 @@ class StrategyStorage:
             
             if filepath.exists():
                 filepath.unlink()
+                logger.info(f"Strategy deleted: {name}")
                 return True
             return False
         except Exception as e:
-            print(f"Error deleting strategy: {e}")
+            logger.error(f"Error deleting strategy '{name}': {e}", exc_info=True)
             return False
     
     @staticmethod

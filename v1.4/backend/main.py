@@ -14,6 +14,7 @@ from typing import List, Dict, Any, Optional
 from itertools import combinations
 from indicators import indicator_manager, get_all_signals, get_pine_script_code
 from performance_metrics import PerformanceMetrics
+from binance_fetcher import get_binance_fetcher
 
 # Strategy imports
 from strategy_models import (
@@ -24,12 +25,16 @@ from strategy_engine import StrategyEngine
 from strategy_storage import strategy_storage
 from pine_script_generator import pine_script_generator
 
+# Live Trading imports
+from live_trading_engine import get_live_trading_engine
+from live_trading_models import TradingConfig, TradeStatus
+
 app = FastAPI(title="Combo Optimizer v1.4 Backend", version="1.4.0")
 
-# Enable CORS for React frontend (port 3000)
+# Enable CORS for React frontend (port 5173 for Vite dev server)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -77,6 +82,20 @@ class BacktestResult(BaseModel):
     draw_down: float
     sharpe: float
     trades_list: List[Dict] = []
+
+# ======================== BINANCE MODELS ========================
+
+class BinanceRequest(BaseModel):
+    symbol: str
+    timeframe: str
+    limit: int = 200
+
+class BinanceResponse(BaseModel):
+    symbol: str
+    timeframe: str
+    count: int
+    ohlcv_data: List[OHLCV]
+    fetched_at: str
 
 # ======================== BACKTESTING ========================
 
@@ -401,6 +420,103 @@ class BacktestEngine:
             'trades_list': completed_trades[-200:]
         }
 
+# ======================== BINANCE API ENDPOINTS ========================
+
+@app.get("/api/binance/symbols")
+async def get_binance_symbols():
+    """Lấy danh sách symbol phổ biến từ Binance"""
+    try:
+        fetcher = get_binance_fetcher()
+        symbols = fetcher.get_available_symbols()
+        return {
+            'status': 'success',
+            'symbols': symbols,
+            'count': len(symbols)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/binance/timeframes")
+async def get_binance_timeframes():
+    """Lấy danh sách timeframe khả dụng"""
+    try:
+        fetcher = get_binance_fetcher()
+        timeframes = fetcher.get_timeframes()
+        return {
+            'status': 'success',
+            'timeframes': timeframes
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/binance/fetch")
+async def fetch_binance_data(request: BinanceRequest):
+    """Lấy OHLCV data từ Binance"""
+    try:
+        if not request.symbol or not request.timeframe:
+            raise ValueError("symbol và timeframe không được để trống")
+        
+        if request.limit < 50 or request.limit > 10000:
+            raise ValueError("limit phải từ 50 đến 10000")
+        
+        fetcher = get_binance_fetcher()
+        
+        # Validate symbol
+        if not fetcher.validate_symbol(request.symbol):
+            raise ValueError(f"Symbol không hợp lệ: {request.symbol}")
+        
+        # Fetch data
+        ohlcv_data = fetcher.fetch_ohlcv(
+            request.symbol,
+            request.timeframe,
+            request.limit
+        )
+        
+        if not ohlcv_data:
+            raise ValueError(f"Không thể lấy data cho {request.symbol}")
+        
+        from datetime import datetime
+        
+        response = {
+            'status': 'success',
+            'symbol': request.symbol,
+            'timeframe': request.timeframe,
+            'count': len(ohlcv_data),
+            'ohlcv_data': ohlcv_data,
+            'fetched_at': datetime.now().isoformat()
+        }
+        
+        return response
+    
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/binance/symbol-info/{symbol}")
+async def get_symbol_info(symbol: str):
+    """Lấy thông tin symbol"""
+    try:
+        fetcher = get_binance_fetcher()
+        info = fetcher.get_symbol_info(symbol)
+        
+        if not info:
+            raise HTTPException(status_code=404, detail=f"Symbol không tìm thấy: {symbol}")
+        
+        return {
+            'status': 'success',
+            'data': info
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ======================== API ENDPOINTS ========================
 
 @app.get("/")
@@ -589,13 +705,27 @@ async def preview_strategy_signals(request: BacktestRequest):
 async def backtest_strategy(request: BacktestRequest):
     """Run full backtest on custom strategy"""
     try:
-        data = [d.dict() if hasattr(d, 'dict') else d for d in request.ohlcv_data]
+        data = request.ohlcv_data
         strategy = request.strategy
+        
+        # DEBUG: Log received parameters
+        print("\n" + "="*70)
+        print("BACKTEST REQUEST RECEIVED")
+        print("="*70)
+        print(f"Strategy: {strategy.name}")
+        print(f"Risk Percent: {strategy.risk_management.risk_percent}%")
+        print(f"Reward Ratio: {strategy.risk_management.reward_ratio}:1")
+        print(f"Stop Loss: {strategy.risk_management.stop_loss_percent}%")
+        print(f"Capital: ${strategy.risk_management.capital:,.2f}")
+        print(f"Margin: {strategy.risk_management.margin}")
+        print(f"OHLCV Data Points: {len(data)}")
+        print("="*70 + "\n")
         
         # Run backtest
         result = StrategyEngine.backtest_strategy(strategy, data)
         
-        return result.dict()
+        # Result is already a dict from the engine
+        return result
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -620,9 +750,46 @@ async def list_strategies():
     """List all saved strategies"""
     try:
         strategies = strategy_storage.list_strategies()
-        return {'strategies': [s.dict() for s in strategies]}
+        return {'strategies': [s.model_dump() for s in strategies]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/strategy/upload")
+async def upload_strategy(request: Request):
+    """Upload strategy from JSON body"""
+    try:
+        data = await request.json()
+        
+        if 'name' not in data:
+            raise HTTPException(status_code=400, detail='Strategy name required')
+        
+        strategy_name = data['name']
+        
+        # Create strategy model and save using Strategy model
+        strategy = Strategy(
+            name=strategy_name,
+            description=data.get('description', ''),
+            indicators=data.get('indicators', []),
+            signal_logic=data.get('signal_logic', {}),
+            filters=data.get('filters', {}),
+            risk_management=data.get('risk_management', {})
+        )
+        success = strategy_storage.save_strategy(strategy)
+        
+        if success:
+            return {
+                'status': 'success',
+                'strategy_name': strategy_name,
+                'message': f'Strategy "{strategy_name}" uploaded'
+            }
+        else:
+            raise HTTPException(status_code=500, detail='Failed to save strategy')
+            
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=f'Invalid strategy format: {str(e)}')
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'Error uploading strategy: {str(e)}')
 
 
 @app.get("/api/strategy/load/{name}")
@@ -631,7 +798,7 @@ async def load_strategy(name: str):
     try:
         strategy = strategy_storage.load_strategy(name)
         if strategy:
-            return strategy.dict()
+            return strategy.model_dump()
         else:
             raise HTTPException(status_code=404, detail=f'Strategy "{name}" not found')
     except HTTPException:
@@ -662,6 +829,253 @@ async def export_pine_script(strategy: Strategy):
     except Exception as e:
         import traceback
         traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class OptimizeStrategyRequest(BaseModel):
+    """Request for strategy optimization"""
+    ohlcv_data: List[Dict[str, Any]]
+    combo_size: int = 2
+    max_combos: Optional[int] = None
+    # Use filters and risk management from base strategy
+    filters: Dict[str, Any] = {}
+    risk_management: Dict[str, Any] = {}
+
+
+@app.post("/api/strategy/optimize")
+async def optimize_strategy(request: OptimizeStrategyRequest):
+    """Optimize strategy by testing all indicator combinations - similar to Combo Optimizer"""
+    try:
+        # Use same indicator list as Combo Optimizer
+        indicators = [
+            'RSI', 'MACD', 'Stochastic', 'Bollinger_Bands',
+            'Volume_MA', 'EMA_50', 'EMA_200', 'EMA_12', 'EMA_26',
+            'ADX', 'CCI', 'MFI', 'ROC', 'VROC', 'RVI', 'Donchian',
+            'Awesome_Oscillator', 'Momentum', 'ATR', 'Pivot_Points', 'OBV', 'SuperTrend'
+        ]
+        
+        print(f"[STRATEGY OPTIMIZE] Testing with {len(indicators)} indicators, combo_size={request.combo_size}")
+        
+        # Generate all combinations
+        from itertools import combinations
+        all_combos = []
+        for combo_tuple in combinations(indicators, request.combo_size):
+            all_combos.append(list(combo_tuple))
+        
+        total_combos = len(all_combos)
+        print(f"[STRATEGY OPTIMIZE] Total combinations: {total_combos}")
+        
+        # Limit combos if specified
+        if request.max_combos and request.max_combos > 0:
+            all_combos = all_combos[:request.max_combos]
+            print(f"[STRATEGY OPTIMIZE] Limited to {len(all_combos)} combos")
+        
+        # Parse filters and risk from request
+        filters_dict = request.filters if request.filters else {}
+        risk_dict = request.risk_management if request.risk_management else {}
+        
+        # Extract parameters
+        threshold = 70  # Default threshold
+        risk_percent = risk_dict.get('risk_percent', 10.0)
+        rr_ratio = risk_dict.get('reward_ratio', 1.0)
+        sl_percent = risk_dict.get('stop_loss_percent', 5.0)
+        
+        # Convert data format
+        data = [d if isinstance(d, dict) else d.dict() if hasattr(d, 'dict') else d for d in request.ohlcv_data]
+        
+        # Pre-compute signals (same as Combo Optimizer)
+        BacktestEngine._get_or_compute_signals(data)
+        
+        # Test multiple thresholds (like testing different configs)
+        thresholds = [50, 55, 60, 65, 70, 75, 80]
+        
+        results = []
+        tested = 0
+        
+        for combo_idx, combo in enumerate(all_combos):
+            for threshold in thresholds:
+                tested += 1
+                
+                # Use same backtest logic as Combo Optimizer
+                result = BacktestEngine.backtest_combo(
+                    combo,
+                    data,
+                    threshold,
+                    risk_percent,
+                    rr_ratio,
+                    sl_percent,
+                    filters_dict,
+                    min_signal_ratio=50,  # Default
+                    candle_confirmation=2  # Default
+                )
+                
+                if result['trades'] > 0:
+                    results.append({
+                        'combo': '+'.join(combo),  # Same format as Combo Optimizer
+                        'combo_name': '+'.join(combo),
+                        'indicators': [
+                            {'type': ind, 'config': {}, 'weight': 1.0}
+                            for ind in combo
+                        ],
+                        'threshold': threshold,
+                        'trades': result['trades'],
+                        'wins': result['wins'],
+                        'losses': result['losses'],
+                        'win_rate': result['win_rate'],
+                        'profit_pct': result['profit_pct'],
+                        'profit_factor': result['profit_factor'],
+                        'draw_down': result['draw_down'],
+                        'sharpe': result['sharpe'],
+                        # For compatibility
+                        'total_trades': result['trades'],
+                        'sharpe_ratio': result['sharpe'],
+                        'max_drawdown': result['draw_down']
+                    })
+            
+            # Progress update
+            if (combo_idx + 1) % 10 == 0:
+                print(f"[STRATEGY OPTIMIZE] Progress: {combo_idx+1}/{len(all_combos)} combos, {tested} tests, {len(results)} results")
+        
+        print(f"[STRATEGY OPTIMIZE] Completed: {tested} tests, {len(results)} results")
+        
+        # Sort by profit
+        results.sort(key=lambda x: x['profit_pct'], reverse=True)
+        
+        return {
+            'total_results': len(results),
+            'total_tested': tested,
+            'top_combos': results[:10]  # Top 10
+        }
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ======================== LIVE TRADING ENDPOINTS ========================
+
+class LiveTradingStartRequest(BaseModel):
+    symbol: str
+    timeframe: str
+    strategy_name: str
+    initial_balance: float
+    risk_percent: float  # % vốn mỗi lệnh
+    margin: float = 1.0  # Margin ratio
+    stoploss_percent: float = 2.0  # Fixed SL %
+    reversal_strength_threshold: float = 70.0
+    max_positions: int = 1
+
+
+@app.post("/api/live-trading/start")
+async def start_live_trading(request: LiveTradingStartRequest):
+    """Start live trading session"""
+    try:
+        engine = get_live_trading_engine()
+        
+        config = TradingConfig(
+            symbol=request.symbol,
+            timeframe=request.timeframe,
+            strategy_name=request.strategy_name,
+            initial_balance=request.initial_balance,
+            risk_percent=request.risk_percent,
+            margin=request.margin,
+            stoploss_percent=request.stoploss_percent,
+            reversal_strength_threshold=request.reversal_strength_threshold,
+            max_positions=request.max_positions,
+        )
+        
+        success = engine.initialize(config)
+        if success:
+            state_dict = engine.get_state()
+            return {"status": "started", "state": state_dict}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to initialize trading engine")
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in start_live_trading: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/live-trading/status")
+async def get_live_trading_status():
+    """Get current trading status"""
+    try:
+        engine = get_live_trading_engine()
+        state = engine.get_state()
+        if not state:
+            return {"status": "not_started"}
+        return {"status": "running", "state": state}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/live-trading/update")
+async def update_live_trading():
+    """Update trading (fetch latest data, check signals, execute trades)"""
+    try:
+        engine = get_live_trading_engine()
+        result = engine.update()
+        return {"status": "success", "result": result, "state": engine.get_state()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/live-trading/stop")
+async def stop_live_trading():
+    """Stop live trading"""
+    try:
+        engine = get_live_trading_engine()
+        engine.stop()
+        return {"status": "stopped", "state": engine.get_state()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/live-trading/pause")
+async def pause_live_trading():
+    """Pause live trading"""
+    try:
+        engine = get_live_trading_engine()
+        engine.pause()
+        return {"status": "paused", "state": engine.get_state()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/live-trading/resume")
+async def resume_live_trading():
+    """Resume live trading"""
+    try:
+        engine = get_live_trading_engine()
+        engine.resume()
+        return {"status": "resumed", "state": engine.get_state()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/live-trading/close-all")
+async def close_all_live_positions():
+    """Close all open positions"""
+    try:
+        engine = get_live_trading_engine()
+        state = engine.get_state()
+        
+        if not state or not state.get("open_positions"):
+            return {"status": "no_positions", "state": state}
+        
+        # Get current price (last closed price)
+        current_price = state.get("state", {}).get("open_positions", [{}])[0].get("current_price", 0)
+        if current_price == 0:
+            raise HTTPException(status_code=400, detail="Cannot determine current price")
+        
+        engine.close_all_positions(current_price)
+        return {"status": "all_closed", "state": engine.get_state()}
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 

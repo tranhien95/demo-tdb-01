@@ -81,6 +81,7 @@ export const TradeTable: React.FC<Props> = ({ trades, totalProfit, totalProfitPc
               <th className="text-left p-3 font-bold">Type</th>
               <th className="text-right p-3 font-bold">Entry</th>
               <th className="text-right p-3 font-bold">Exit</th>
+              <th className="text-right p-3 font-bold">Balance</th>
               <th className="text-right p-3 font-bold">Position $</th>
               <th className="text-right p-3 font-bold">Capital %</th>
               <th className="text-right p-3 font-bold">Profit %</th>
@@ -112,6 +113,14 @@ export const TradeTable: React.FC<Props> = ({ trades, totalProfit, totalProfitPc
                     </td>
                     <td className="p-3 text-right font-mono">{trade.entry.toFixed(5)}</td>
                     <td className="p-3 text-right font-mono">{trade.exit?.toFixed(5) || '-'}</td>
+                    <td className="p-3 text-right font-bold text-purple-600">
+                      {trade.balance_before ? formatCurrency(trade.balance_before) : '-'}
+                      {trade.balance_after && (
+                        <span className="block text-xs text-gray-500">
+                          → {formatCurrency(trade.balance_after)}
+                        </span>
+                      )}
+                    </td>
                     <td className="p-3 text-right font-bold text-blue-600">{formatCurrency(positionSize)}</td>
                     <td className="p-3 text-right font-bold text-blue-600">{positionPercent.toFixed(2)}%</td>
                     <td className={`p-3 text-right font-bold ${profitPct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -144,7 +153,7 @@ export const TradeTable: React.FC<Props> = ({ trades, totalProfit, totalProfitPc
                   {/* Expanded Detail Row */}
                   {isExpanded && (
                     <tr className="bg-blue-50 dark:bg-blue-900/20 border-b">
-                      <td colSpan={11} className="p-4">
+                      <td colSpan={12} className="p-4">
                         <div className="space-y-3">
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             <div className="p-3 bg-white dark:bg-gray-700 rounded-lg">
@@ -167,6 +176,18 @@ export const TradeTable: React.FC<Props> = ({ trades, totalProfit, totalProfitPc
 
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             <div className="p-3 bg-white dark:bg-gray-700 rounded-lg">
+                              <div className="text-xs text-gray-600 mb-1">Balance Before</div>
+                              <div className="text-lg font-bold text-purple-600">
+                                {trade.balance_before ? formatCurrency(trade.balance_before) : '-'}
+                              </div>
+                            </div>
+                            <div className="p-3 bg-white dark:bg-gray-700 rounded-lg">
+                              <div className="text-xs text-gray-600 mb-1">Balance After</div>
+                              <div className="text-lg font-bold text-purple-600">
+                                {trade.balance_after ? formatCurrency(trade.balance_after) : '-'}
+                              </div>
+                            </div>
+                            <div className="p-3 bg-white dark:bg-gray-700 rounded-lg">
                               <div className="text-xs text-gray-600 mb-1">Position Size</div>
                               <div className="text-lg font-bold text-blue-600">
                                 {formatCurrency(positionSize)}
@@ -178,6 +199,9 @@ export const TradeTable: React.FC<Props> = ({ trades, totalProfit, totalProfitPc
                                 {positionPercent.toFixed(2)}%
                               </div>
                             </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             <div className="p-3 bg-white dark:bg-gray-700 rounded-lg">
                               <div className="text-xs text-gray-600 mb-1">Profit %</div>
                               <div className={`text-lg font-bold ${profitPct >= 0 ? 'text-green-600' : 'text-red-600'}`}>

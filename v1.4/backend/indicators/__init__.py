@@ -103,17 +103,18 @@ class IndicatorManager:
         return self.indicators.get(name)
     
     def calculate_indicator(self, name: str, data: list, index: int, **kwargs) -> dict:
-        """Calculate specific indicator"""
+        """Calculate specific indicator with safe wrapper"""
         indicator = self.get_indicator(name)
         if indicator:
-            return indicator.calculate(data, index, **kwargs)
+            # Use calculate_safe for validation and error handling
+            return indicator.calculate_safe(data, index, **kwargs)
         return {"bullish": False, "bearish": False, "value": 0, "strength": 0}
     
     def get_all_signals(self, data: list, index: int) -> dict:
-        """Get signals from all indicators"""
+        """Get signals from all indicators with safe wrapper"""
         signals = {}
         for name, indicator in self.indicators.items():
-            signals[name] = indicator.calculate(data, index)
+            signals[name] = indicator.calculate_safe(data, index)
         return signals
     
     def get_pine_script(self, indicator_names: list) -> str:

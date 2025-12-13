@@ -1,4 +1,17 @@
+# Core Framework
 fastapi==0.104.1
-uvicorn==0.24.0
+uvicorn[standard]==0.24.0
 pydantic==2.5.0
-python-multipart==0.0.6
+
+# Database
+sqlalchemy==2.0.23
+alembic==1.12.1
+
+# Data & API
+ccxt==4.0.97
+python-dateutil==2.8.2
+
+# Optional: For production
+# python-multipart==0.0.6  # For file uploads
+# email-validator==2.1.0   # For email validation
+# psycopg2-binary==2.9.9   # PostgreSQL driver (if using PostgreSQL)

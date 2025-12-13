@@ -8,6 +8,7 @@ import { StrategyResults } from './StrategyResults'
 import { StrategyChart } from './StrategyChart'
 import { ProgressBar } from './ProgressBar'
 import { useOptimizerStore } from '../store/optimizerStore'
+import { Layout } from './Layout'
 
 export const StrategyBuilder: React.FC = () => {
   const { csvData } = useOptimizerStore()
@@ -30,12 +31,13 @@ export const StrategyBuilder: React.FC = () => {
       enable_trend_filter: false,
       trend_ma: 200
     },
-    risk_management: {
-      risk_percent: 1.0,
-      reward_ratio: 2.0,
-      stop_loss_percent: 1.0,
-      capital: 10000
-    }
+     risk_management: {
+       risk_percent: 10.0,
+       reward_ratio: 1.0,
+       stop_loss_percent: 5.0,
+       capital: 1000,
+       margin: undefined
+     }
   })
   
   const [editingIndicator, setEditingIndicator] = useState<{ index: number; config: IndicatorConfig } | null>(null)
@@ -255,32 +257,58 @@ export const StrategyBuilder: React.FC = () => {
     }
   }
 
+  // Load optimized combo from localStorage (saved by Combo Optimizer)
+  useEffect(() => {
+    const savedCombo = localStorage.getItem('optimizedCombo')
+    if (savedCombo) {
+      try {
+        const combo = JSON.parse(savedCombo)
+        const newIndicators: IndicatorConfig[] = combo.indicators.map((ind: any) => ({
+          type: ind.type,
+          config: ind.config || {},
+          weight: ind.weight || 1.0,
+          enabled: true
+        }))
+
+        setStrategy(prev => ({
+          ...prev,
+          indicators: newIndicators,
+          signal_logic: {
+            ...prev.signal_logic,
+            threshold_percent: combo.threshold || 70
+          }
+        }))
+
+        localStorage.removeItem('optimizedCombo')
+        alert('✅ Đã load combo từ Combo Optimizer!')
+      } catch (e) {
+        console.error('Failed to load optimized combo:', e)
+      }
+    }
+  }, [])
+
   const totalWeight = strategy.indicators
     .filter(ind => ind.enabled)
     .reduce((sum, ind) => sum + ind.weight, 0)
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="gradient-header rounded-2xl p-6 shadow-xl">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-3xl font-bold">🎯 Strategy Builder</h2>
-            <p className="text-sm opacity-90 mt-1">Xây dựng chiến lược tùy chỉnh với weighted indicators</p>
-          </div>
-          <div className="flex gap-2">
-            <button className="btn-secondary" onClick={() => setShowLoadModal(true)}>
-              📂 Load
-            </button>
-            <button className="btn-secondary" onClick={() => setShowSaveModal(true)}>
-              💾 Save
-            </button>
-            <button className="btn-secondary" onClick={exportPineScript}>
-              📤 Export Pine
-            </button>
-          </div>
-        </div>
-      </div>
+    <Layout
+      title="🎯 Strategy Builder"
+      description="Xây dựng chiến lược tùy chỉnh với weighted indicators"
+      actions={
+        <>
+          <button className="btn-secondary" onClick={() => setShowLoadModal(true)}>
+            📂 Load
+          </button>
+          <button className="btn-secondary" onClick={() => setShowSaveModal(true)}>
+            💾 Save
+          </button>
+          <button className="btn-secondary" onClick={exportPineScript}>
+            📤 Export Pine
+          </button>
+        </>
+      }
+    >
 
       {/* Strategy Name & Description */}
       <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-lg">
@@ -408,9 +436,9 @@ export const StrategyBuilder: React.FC = () => {
         onChange={(filters) => setStrategy(prev => ({ ...prev, filters }))}
       />
 
-      {/* Risk Management */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-lg">
-        <h3 className="text-lg font-bold mb-3">💰 Risk Management</h3>
+       {/* Risk Management */}
+       <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-lg">
+         <h3 className="text-lg font-bold mb-3">💰 Risk Management</h3>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-bold mb-1">Initial Capital ($)</label>
@@ -434,9 +462,36 @@ export const StrategyBuilder: React.FC = () => {
                 ...prev,
                 risk_management: { ...prev.risk_management, risk_percent: parseFloat(e.target.value) || 1.0 }
               }))}
-              className="w-full px-3 py-1.5 text-sm border rounded-lg"
+              className={`w-full px-3 py-1.5 text-sm border rounded-lg ${
+                strategy.risk_management.risk_percent > 10 
+                  ? 'border-red-500 bg-red-50 dark:bg-red-900/20' 
+                  : strategy.risk_management.risk_percent > 5
+                  ? 'border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20'
+                  : ''
+              }`}
               step="0.1"
+              min="0.1"
+              max="100"
             />
+            {strategy.risk_management.risk_percent > 10 && (
+              <div className="mt-1 p-2 bg-red-100 dark:bg-red-900/30 border-l-4 border-red-500 rounded text-xs">
+                <div className="font-bold text-red-700 dark:text-red-300">⚠️ CẢNH BÁO: Risk quá cao!</div>
+                <div className="text-red-600 dark:text-red-400 mt-1">
+                  Risk {strategy.risk_management.risk_percent}% rất nguy hiểm. Chỉ cần {Math.floor(100 / strategy.risk_management.risk_percent)} trades thua là phá sản!
+                </div>
+                <div className="text-red-600 dark:text-red-400 mt-1">
+                  Khuyến nghị: 1-2% (conservative), 2-5% (moderate), tối đa 5-10% (aggressive).
+                </div>
+              </div>
+            )}
+            {strategy.risk_management.risk_percent > 5 && strategy.risk_management.risk_percent <= 10 && (
+              <div className="mt-1 p-2 bg-yellow-100 dark:bg-yellow-900/30 border-l-4 border-yellow-500 rounded text-xs">
+                <div className="font-bold text-yellow-700 dark:text-yellow-300">⚠️ Risk cao</div>
+                <div className="text-yellow-600 dark:text-yellow-400 mt-1">
+                  Risk {strategy.risk_management.risk_percent}% là aggressive. Chỉ có thể thua {Math.floor(100 / strategy.risk_management.risk_percent)} trades trước khi phá sản.
+                </div>
+              </div>
+            )}
           </div>
           <div>
             <label className="block text-xs font-bold mb-1">Reward Ratio</label>
@@ -463,6 +518,28 @@ export const StrategyBuilder: React.FC = () => {
               className="w-full px-3 py-1.5 text-sm border rounded-lg"
               step="0.1"
             />
+          </div>
+          <div>
+            <label className="block text-xs font-bold mb-1">Margin/Leverage (x)</label>
+            <input
+              type="number"
+              value={strategy.risk_management.margin || ''}
+              onChange={(e) => setStrategy(prev => ({
+                ...prev,
+                risk_management: { 
+                  ...prev.risk_management, 
+                  margin: e.target.value ? parseFloat(e.target.value) : undefined 
+                }
+              }))}
+              className="w-full px-3 py-1.5 text-sm border rounded-lg"
+              step="0.5"
+              min="1"
+              max="125"
+              placeholder="Không dùng margin (để trống)"
+            />
+            <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Để trống = không dùng margin. Ví dụ: 10x = leverage 10 lần
+            </div>
           </div>
         </div>
       </div>
@@ -601,6 +678,6 @@ export const StrategyBuilder: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+    </Layout>
   )
 }

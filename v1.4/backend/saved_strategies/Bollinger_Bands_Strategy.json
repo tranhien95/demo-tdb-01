@@ -1,0 +1,36 @@
+{
+  "name": "Bollinger_Bands_Strategy",
+  "description": "Bollinger Bands breakout strategy",
+  "indicators": [
+    {
+      "type": "bollinger",
+      "id": "bb_20_2",
+      "enabled": true,
+      "params": {
+        "period": 20,
+        "std_dev": 2
+      },
+      "bullish": true,
+      "bearish": true
+    }
+  ],
+  "signal_logic": {
+    "long_conditions": [
+      "bb_20_2_lower"
+    ],
+    "short_conditions": [
+      "bb_20_2_upper"
+    ]
+  },
+  "filters": {
+    "adx_filter": false,
+    "volume_filter": false,
+    "ma_filter": false
+  },
+  "risk_management": {
+    "position_size_percent": 2.0,
+    "stop_loss_percent": 1.5,
+    "take_profit_percent": 2.5,
+    "max_positions": 1
+  }
+}

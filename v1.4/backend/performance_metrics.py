@@ -344,6 +344,16 @@ class PerformanceMetrics:
                 'max_consecutive_losses': 0,
                 'max_consecutive_wins': 0,
                 'profit_per_trade': 0.0,
+                'avg_win': 0.0,
+                'avg_loss': 0.0,
+                'avg_win_pct': 0.0,
+                'avg_loss_pct': 0.0,
+                'largest_win': 0.0,
+                'largest_loss': 0.0,
+                'max_drawdown_pct': 0.0,
+                'max_drawdown_value': 0.0,
+                'drawdown_duration': 0,
+                'recovery_duration': 0,
             }
         
         profit_factor = PerformanceMetrics.calculate_profit_factor(trades)

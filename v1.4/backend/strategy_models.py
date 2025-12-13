@@ -3,7 +3,7 @@ Strategy Models
 Data models for custom strategy building
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Dict, Optional, Any
 from datetime import datetime
 
@@ -20,40 +20,36 @@ class IndicatorConfig(BaseModel):
 class SignalLogic(BaseModel):
     """Signal confirmation logic"""
     threshold_percent: float = Field(default=70.0, ge=0, le=100, description="Minimum % of weighted agreement needed")
+    min_holding_candles: int = Field(default=3, ge=1, le=100, description="Minimum candles to hold position before allowing switch")
+    switch_confirmation_candles: int = Field(default=2, ge=1, le=10, description="Candles needed to confirm switch signal")
+    allow_position_switch: bool = Field(default=True, description="Enable/disable position switching")
 
 
 class FilterConfig(BaseModel):
     """Trading filters configuration"""
-    # ADX Filter
-    enable_adx_filter: bool = Field(default=False)
-    adx_threshold: float = Field(default=25.0, ge=0, le=100)
+    enable_adx: bool = Field(default=False, description="Enable ADX filter")
+    adx_threshold: float = Field(default=25.0, ge=0, le=100, description="ADX threshold")
     
-    # Volume Filter
-    enable_volume_filter: bool = Field(default=False)
-    volume_ma_period: int = Field(default=20, ge=5, le=200)
-    volume_multiplier: float = Field(default=1.5, ge=1.0, le=5.0)
+    enable_volume: bool = Field(default=False, description="Enable volume filter")
+    volume_threshold: float = Field(default=1.5, ge=1.0, le=5.0, description="Volume multiplier threshold")
     
-    # MA Trend Filter
-    enable_ma_filter: bool = Field(default=False)
-    ma_period: int = Field(default=50, ge=10, le=500)
+    enable_ma_filter: bool = Field(default=False, description="Enable MA trend filter")
+    ma_period: int = Field(default=50, ge=10, le=500, description="MA period")
     
-    # ATR Volatility Filter
-    enable_atr_filter: bool = Field(default=False)
-    atr_period: int = Field(default=14, ge=5, le=50)
-    atr_min: float = Field(default=0.5, ge=0.1, le=10.0)
+    enable_atr_filter: bool = Field(default=False, description="Enable ATR volatility filter")
+    min_atr: float = Field(default=0.0005, ge=0.00001, le=10.0, description="Minimum ATR value")
     
-    # Trend Filter (Price vs EMA200)
-    enable_trend_filter: bool = Field(default=False)
-    trend_ema_period: int = Field(default=200, ge=50, le=500)
+    enable_trend_filter: bool = Field(default=False, description="Enable trend filter")
+    trend_ma: int = Field(default=200, ge=50, le=500, description="Trend MA period")
 
 
 class RiskManagement(BaseModel):
     """Risk management settings"""
     risk_percent: float = Field(default=10.0, ge=1.0, le=100.0, description="Risk per trade %")
-    rr_ratio: float = Field(default=2.0, ge=0.5, le=10.0, description="Risk:Reward ratio")
-    sl_percent: float = Field(default=0.75, ge=0.1, le=10.0, description="Stop loss %")
-    candle_confirmation: int = Field(default=2, ge=1, le=10, description="Candles to confirm signal")
+    reward_ratio: float = Field(default=1.0, ge=0.5, le=10.0, description="Reward ratio (for TP calculation)")
+    stop_loss_percent: float = Field(default=5.0, ge=0.1, le=10.0, description="Stop loss %")
     capital: float = Field(default=10000.0, ge=100.0, le=1000000.0, description="Initial capital")
+    margin: Optional[float] = Field(default=None, description="Margin to use (if leveraged trading)")
 
 
 class Strategy(BaseModel):
@@ -165,8 +161,7 @@ class BacktestResult(BaseModel):
     long_signals: int
     short_signals: int
     
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class StrategyListItem(BaseModel):

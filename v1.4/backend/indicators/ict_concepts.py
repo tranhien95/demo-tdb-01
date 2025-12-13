@@ -1,190 +1,149 @@
 """
-ICT Concepts - Inner Circle Trader concepts
-Order Blocks, Fair Value Gaps, Liquidity Sweeps, Premium/Discount
+ICT (Inner Circle Trader) Concepts Indicator
+Advanced market structure analysis with fair value gaps and liquidity
 """
 
-from typing import List, Dict
+from typing import Dict, List
 from .base import BaseIndicator
 
 
 class ICTConceptsIndicator(BaseIndicator):
-    """ICT (Inner Circle Trader) Concepts"""
+    """
+    ICT Trading Concepts
+    - Order Blocks
+    - Fair Value Gaps (FVG)
+    - Liquidity Sweeps
+    - Premium/Discount Zones
+    """
     
     def default_config(self) -> Dict:
+        """Default configuration"""
         return {
-            'ob_lookback': 20,           # Order Block lookback
-            'fvg_threshold': 0.0005,     # FVG minimum gap (0.05%)
-            'liquidity_lookback': 50,    # Liquidity sweep lookback
-            'premium_discount': True,    # Enable premium/discount zones
-            'description': 'ICT Trading Concepts'
+            'ob_lookback': 50,
+            'fvg_threshold': 0.3,
+            'liquidity_lookback': 20,
         }
     
     def _detect_order_block(self, data: List[Dict], index: int, lookback: int) -> Dict:
-        """Detect bullish/bearish order blocks"""
-        if index < lookback + 3:
-            return {"bullish_ob": False, "bearish_ob": False, "ob_zone": None}
+        """Detect order blocks (strong price rejection zones)"""
+        if index < lookback:
+            return {'bullish_ob': False, 'bearish_ob': False, 'strength': 0}
         
-        # Bullish OB: Last bearish candle before strong bullish move
         bullish_ob = False
-        bullish_ob_zone = None
-        
-        # Look for strong bullish move (3+ consecutive bullish candles)
-        recent_bullish = 0
-        for i in range(index - 2, index + 1):
-            if data[i]['close'] > data[i]['open']:
-                recent_bullish += 1
-        
-        if recent_bullish >= 3:
-            # Find last bearish candle before the move
-            for i in range(index - 3, max(0, index - lookback), -1):
-                if data[i]['close'] < data[i]['open']:
-                    bullish_ob = True
-                    bullish_ob_zone = {
-                        'high': data[i]['high'],
-                        'low': data[i]['low'],
-                        'index': i
-                    }
-                    break
-        
-        # Bearish OB: Last bullish candle before strong bearish move
         bearish_ob = False
-        bearish_ob_zone = None
+        strength = 0
         
-        recent_bearish = 0
-        for i in range(index - 2, index + 1):
-            if data[i]['close'] < data[i]['open']:
-                recent_bearish += 1
-        
-        if recent_bearish >= 3:
-            for i in range(index - 3, max(0, index - lookback), -1):
-                if data[i]['close'] > data[i]['open']:
-                    bearish_ob = True
-                    bearish_ob_zone = {
-                        'high': data[i]['high'],
-                        'low': data[i]['low'],
-                        'index': i
-                    }
-                    break
+        # Bullish OB: Higher high-low with wick rejection
+        if index >= 2:
+            curr = data[index]['close']
+            prev_high = max(data[i]['high'] for i in range(max(0, index - lookback), index))
+            prev_low = min(data[i]['low'] for i in range(max(0, index - lookback), index))
+            
+            if curr > prev_high * 0.98 and data[index]['low'] < data[index - 1]['low']:
+                bullish_ob = True
+                strength = min((curr / (prev_high * 0.98) - 1) * 100, 100)
+            
+            if curr < prev_low * 1.02 and data[index]['high'] > data[index - 1]['high']:
+                bearish_ob = True
+                strength = min((1 - curr / (prev_low * 1.02)) * 100, 100)
         
         return {
-            "bullish_ob": bullish_ob,
-            "bearish_ob": bearish_ob,
-            "bullish_zone": bullish_ob_zone,
-            "bearish_zone": bearish_ob_zone
+            'bullish_ob': bullish_ob,
+            'bearish_ob': bearish_ob,
+            'strength': strength
         }
     
     def _detect_fvg(self, data: List[Dict], index: int, threshold: float) -> Dict:
-        """Detect Fair Value Gaps (imbalances)"""
+        """Detect Fair Value Gaps (gap between candles)"""
         if index < 2:
-            return {"bullish_fvg": False, "bearish_fvg": False, "fvg_zone": None}
+            return {'bullish_fvg': False, 'bearish_fvg': False, 'gap_size': 0}
         
-        candle_0 = data[index - 2]
-        candle_1 = data[index - 1]
-        candle_2 = data[index]
-        
-        # Bullish FVG: Gap between candle_0 high and candle_2 low
         bullish_fvg = False
-        bullish_fvg_zone = None
-        
-        if candle_2['low'] > candle_0['high']:
-            gap_size = (candle_2['low'] - candle_0['high']) / candle_1['close']
-            if gap_size >= threshold:
-                bullish_fvg = True
-                bullish_fvg_zone = {
-                    'top': candle_2['low'],
-                    'bottom': candle_0['high'],
-                    'size': gap_size
-                }
-        
-        # Bearish FVG: Gap between candle_0 low and candle_2 high
         bearish_fvg = False
-        bearish_fvg_zone = None
+        gap_size = 0
         
-        if candle_2['high'] < candle_0['low']:
-            gap_size = (candle_0['low'] - candle_2['high']) / candle_1['close']
-            if gap_size >= threshold:
+        # Bullish FVG: Previous low > Current high (gap up)
+        if data[index - 1]['low'] > data[index]['high']:
+            gap_size = ((data[index - 1]['low'] - data[index]['high']) / data[index]['close']) * 100
+            if gap_size > threshold:
+                bullish_fvg = True
+        
+        # Bearish FVG: Previous high < Current low (gap down)
+        if data[index - 1]['high'] < data[index]['low']:
+            gap_size = ((data[index]['low'] - data[index - 1]['high']) / data[index]['close']) * 100
+            if gap_size > threshold:
                 bearish_fvg = True
-                bearish_fvg_zone = {
-                    'top': candle_0['low'],
-                    'bottom': candle_2['high'],
-                    'size': gap_size
-                }
         
         return {
-            "bullish_fvg": bullish_fvg,
-            "bearish_fvg": bearish_fvg,
-            "bullish_zone": bullish_fvg_zone,
-            "bearish_zone": bearish_fvg_zone
+            'bullish_fvg': bullish_fvg,
+            'bearish_fvg': bearish_fvg,
+            'gap_size': gap_size
         }
     
     def _detect_liquidity_sweep(self, data: List[Dict], index: int, lookback: int) -> Dict:
-        """Detect liquidity sweeps (stop hunts)"""
+        """Detect liquidity sweeps (break of prior high/low)"""
         if index < lookback:
-            return {"buy_side_sweep": False, "sell_side_sweep": False}
+            return {
+                'buy_side_sweep': False,
+                'sell_side_sweep': False,
+                'sweep_strength': 0
+            }
         
-        recent_data = data[max(0, index - lookback):index + 1]
-        current = data[index]
-        
-        # Find recent swing high/low
-        swing_high = max(d['high'] for d in recent_data[:-1])
-        swing_low = min(d['low'] for d in recent_data[:-1])
-        
-        # Buy-side liquidity sweep: Price spikes above recent high then reverses
         buy_side_sweep = False
-        if current['high'] > swing_high:
-            # Check if price closed back below the high (false breakout)
-            if current['close'] < swing_high:
-                buy_side_sweep = True
-        
-        # Sell-side liquidity sweep: Price spikes below recent low then reverses
         sell_side_sweep = False
-        if current['low'] < swing_low:
-            # Check if price closed back above the low
-            if current['close'] > swing_low:
-                sell_side_sweep = True
+        sweep_strength = 0
+        
+        curr_high = data[index]['high']
+        curr_low = data[index]['low']
+        prior_high = max(data[i]['high'] for i in range(max(0, index - lookback), index))
+        prior_low = min(data[i]['low'] for i in range(max(0, index - lookback), index))
+        
+        # Sweep of buy-side (break below prior low) = bearish
+        if curr_low < prior_low:
+            buy_side_sweep = True
+            sweep_strength = min(((prior_low - curr_low) / prior_low) * 100, 100)
+        
+        # Sweep of sell-side (break above prior high) = bullish
+        if curr_high > prior_high:
+            sell_side_sweep = True
+            sweep_strength = min(((curr_high - prior_high) / prior_high) * 100, 100)
         
         return {
-            "buy_side_sweep": buy_side_sweep,
-            "sell_side_sweep": sell_side_sweep,
-            "swing_high": swing_high,
-            "swing_low": swing_low
+            'buy_side_sweep': buy_side_sweep,
+            'sell_side_sweep': sell_side_sweep,
+            'sweep_strength': sweep_strength
         }
     
-    def _premium_discount_zones(self, data: List[Dict], index: int, lookback: int = 50) -> Dict:
-        """Calculate premium and discount zones"""
+    def _premium_discount_zones(self, data: List[Dict], index: int, lookback: int) -> Dict:
+        """Detect premium and discount zones"""
         if index < lookback:
-            return {"in_premium": False, "in_discount": False, "in_equilibrium": False}
+            return {
+                'in_premium': False,
+                'in_discount': False,
+                'in_equilibrium': False,
+                'range_high': 0,
+                'range_low': 0
+            }
         
-        recent_data = data[max(0, index - lookback):index + 1]
-        range_high = max(d['high'] for d in recent_data)
-        range_low = min(d['low'] for d in recent_data)
-        
-        range_size = range_high - range_low
-        equilibrium = (range_high + range_low) / 2
-        
-        # Premium zone: Upper 50%
-        premium_threshold = equilibrium + (range_size * 0.2)
-        
-        # Discount zone: Lower 50%
-        discount_threshold = equilibrium - (range_size * 0.2)
-        
+        range_high = max(data[i]['high'] for i in range(max(0, index - lookback), index + 1))
+        range_low = min(data[i]['low'] for i in range(max(0, index - lookback), index + 1))
+        midline = (range_high + range_low) / 2
         current_price = data[index]['close']
         
-        in_premium = current_price > premium_threshold
-        in_discount = current_price < discount_threshold
-        in_equilibrium = not in_premium and not in_discount
+        in_premium = current_price > midline and current_price > range_low * 1.01
+        in_discount = current_price < midline and current_price < range_high * 0.99
+        in_equilibrium = (current_price >= midline * 0.995) and (current_price <= midline * 1.005)
         
         return {
-            "in_premium": in_premium,
-            "in_discount": in_discount,
-            "in_equilibrium": in_equilibrium,
-            "equilibrium": equilibrium,
-            "range_high": range_high,
-            "range_low": range_low
+            'in_premium': in_premium,
+            'in_discount': in_discount,
+            'in_equilibrium': in_equilibrium,
+            'range_high': range_high,
+            'range_low': range_low
         }
     
     def calculate(self, data: List[Dict], index: int, **kwargs) -> Dict:
-        """Calculate ICT Concepts"""
+        """Calculate ICT Trading Concepts"""
         ob_lookback = kwargs.get('ob_lookback', self.config['ob_lookback'])
         fvg_threshold = kwargs.get('fvg_threshold', self.config['fvg_threshold'])
         liq_lookback = kwargs.get('liquidity_lookback', self.config['liquidity_lookback'])
@@ -194,7 +153,14 @@ class ICTConceptsIndicator(BaseIndicator):
                 "bullish": False,
                 "bearish": False,
                 "value": {},
-                "strength": 0
+                "strength": 0,
+                "signal_type": "NEUTRAL",
+                "confidence": 0,
+                "trend": "NEUTRAL",
+                "reversal_signal": False,
+                "divergence": False,
+                "supporting_signals": [],
+                "raw_values": {}
             }
         
         # Detect all ICT concepts
@@ -203,15 +169,27 @@ class ICTConceptsIndicator(BaseIndicator):
         liquidity = self._detect_liquidity_sweep(data, index, liq_lookback)
         zones = self._premium_discount_zones(data, index, liq_lookback)
         
+        # Market structure (HH+HL = bullish, LL+LH = bearish)
+        if index >= 3:
+            recent_highs = [data[i]['high'] for i in range(max(0, index - 5), index + 1)]
+            recent_lows = [data[i]['low'] for i in range(max(0, index - 5), index + 1)]
+            
+            hh = len(recent_highs) > 1 and recent_highs[-1] > recent_highs[-2]
+            ll = len(recent_lows) > 1 and recent_lows[-1] > recent_lows[-2]
+            
+            market_structure = "BULLISH" if hh and ll else "BEARISH"
+        else:
+            market_structure = "NEUTRAL"
+        
         # Bullish signals
         bullish_score = 0
         if order_blocks['bullish_ob']:
             bullish_score += 25
         if fvg['bullish_fvg']:
             bullish_score += 20
-        if liquidity['sell_side_sweep']:  # Sweep of sell-side = bullish
+        if liquidity['sell_side_sweep']:
             bullish_score += 30
-        if zones['in_discount']:  # Buy in discount zone
+        if zones['in_discount']:
             bullish_score += 15
         
         # Bearish signals
@@ -220,13 +198,29 @@ class ICTConceptsIndicator(BaseIndicator):
             bearish_score += 25
         if fvg['bearish_fvg']:
             bearish_score += 20
-        if liquidity['buy_side_sweep']:  # Sweep of buy-side = bearish
+        if liquidity['buy_side_sweep']:
             bearish_score += 30
-        if zones['in_premium']:  # Sell in premium zone
+        if zones['in_premium']:
             bearish_score += 15
         
         bullish = bullish_score > bearish_score and bullish_score >= 30
         bearish = bearish_score > bullish_score and bearish_score >= 30
+        strength = max(bullish_score, bearish_score)
+        
+        # Determine signal type
+        if bullish_score > 70:
+            signal_type = "STRONG_BUY"
+        elif bullish_score > 50:
+            signal_type = "BUY"
+        elif bearish_score > 70:
+            signal_type = "STRONG_SELL"
+        elif bearish_score > 50:
+            signal_type = "SELL"
+        else:
+            signal_type = "NEUTRAL"
+        
+        total_score = bullish_score + bearish_score
+        confidence = (bullish_score / total_score * 100) if total_score > 0 else 50
         
         return {
             "bullish": bullish,
@@ -237,9 +231,32 @@ class ICTConceptsIndicator(BaseIndicator):
                 "liquidity_sweeps": liquidity,
                 "zones": zones,
                 "bullish_score": bullish_score,
-                "bearish_score": bearish_score
+                "bearish_score": bearish_score,
+                "market_structure": market_structure
             },
-            "strength": max(bullish_score, bearish_score)
+            "strength": min(strength, 100),
+            "signal_type": signal_type,
+            "confidence": confidence,
+            "trend": market_structure,
+            "reversal_signal": liquidity['buy_side_sweep'] or liquidity['sell_side_sweep'],
+            "divergence": False,
+            "supporting_signals": [
+                f"Market Structure: {market_structure}",
+                f"Fair Value Gap: {'Detected' if (fvg['bullish_fvg'] or fvg['bearish_fvg']) else 'None'}",
+                f"Premium Zone: {'Active' if zones['in_premium'] else 'Inactive'}",
+                f"Discount Zone: {'Active' if zones['in_discount'] else 'Inactive'}",
+                f"Entry Quality: {'High' if confidence > 70 else 'Low'}"
+            ],
+            "raw_values": {
+                "market_structure": market_structure,
+                "fvg_detected": fvg['bullish_fvg'] or fvg['bearish_fvg'],
+                "premium_zone": zones['in_premium'],
+                "discount_zone": zones['in_discount'],
+                "liquidity_level": (data[index]['high'] + data[index]['low']) / 2,
+                "breakout_potential": strength,
+                "bullish_score": bullish_score,
+                "bearish_score": bearish_score
+            }
         }
     
     def get_pine_script(self) -> str:
@@ -251,40 +268,29 @@ lookback = 50
 // Premium/Discount Zones
 range_high = ta.highest(high, lookback)
 range_low = ta.lowest(low, lookback)
-equilibrium = (range_high + range_low) / 2
-range_size = range_high - range_low
+midline = (range_high + range_low) / 2
 
-premium_zone = equilibrium + range_size * 0.25
-discount_zone = equilibrium - range_size * 0.25
+in_premium = close > midline
+in_discount = close < midline
 
-in_premium = close > premium_zone
-in_discount = close < discount_zone
+// Fair Value Gaps
+bullish_fvg = low[1] > high  // Gap up
+bearish_fvg = high[1] < low  // Gap down
 
-// Fair Value Gap (FVG)
-bullish_fvg = low > high[2] and (low - high[2]) / close > 0.0005
-bearish_fvg = high < low[2] and (low[2] - high) / close > 0.0005
+// Liquidity Sweeps
+prior_high = ta.highest(high, lookback)
+prior_low = ta.lowest(low, lookback)
 
-// Liquidity Sweep
-swing_high = ta.highest(high, lookback)
-swing_low = ta.lowest(low, lookback)
+buy_side_sweep = low < prior_low  // Break below
+sell_side_sweep = high > prior_high  // Break above
 
-buy_side_sweep = high > swing_high[1] and close < swing_high[1]
-sell_side_sweep = low < swing_low[1] and close > swing_low[1]
+// Market Structure
+hh = high > high[1] and high[1] > high[2]
+ll = low < low[1] and low[1] < low[2]
 
-// Order Blocks (simplified)
-is_bullish_ob = close[3] < open[3] and close > open and close[1] > open[1] and close[2] > open[2]
-is_bearish_ob = close[3] > open[3] and close < open and close[1] < open[1] and close[2] < open[2]
+bullish_signal = sell_side_sweep or bullish_fvg or (hh and ll)
+bearish_signal = buy_side_sweep or bearish_fvg
 
-// Combined signals
-ict_bullish = (bullish_fvg or sell_side_sweep or is_bullish_ob) and in_discount
-ict_bearish = (bearish_fvg or buy_side_sweep or is_bearish_ob) and in_premium
-
-// Plot zones
-bgcolor(in_premium ? color.new(color.red, 95) : na, title="Premium Zone")
-bgcolor(in_discount ? color.new(color.green, 95) : na, title="Discount Zone")
-plot(equilibrium, "Equilibrium", color=color.gray, linewidth=1, style=plot.style_circles)
-
-plotshape(bullish_fvg, "Bull FVG", shape.square, location.belowbar, color.green, size=size.tiny)
-plotshape(bearish_fvg, "Bear FVG", shape.square, location.abovebar, color.red, size=size.tiny)
-plotshape(sell_side_sweep, "Sell Sweep", shape.diamond, location.belowbar, color.aqua, size=size.small)
-plotshape(buy_side_sweep, "Buy Sweep", shape.diamond, location.abovebar, color.orange, size=size.small)"""
+plotshape(bullish_signal, style=shape.arrowup, color=color.green)
+plotshape(bearish_signal, style=shape.arrowdown, color=color.red)
+"""

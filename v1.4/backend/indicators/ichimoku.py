@@ -44,7 +44,14 @@ class IchimokuIndicator(BaseIndicator):
                 "bullish": False,
                 "bearish": False,
                 "value": None,
-                "strength": 0
+                "strength": 0,
+                "signal_type": "NEUTRAL",
+                "confidence": 0,
+                "trend": "NEUTRAL",
+                "reversal_signal": False,
+                "divergence": False,
+                "supporting_signals": [],
+                "raw_values": {}
             }
         
         # Tenkan-sen (Conversion Line)
@@ -92,6 +99,16 @@ class IchimokuIndicator(BaseIndicator):
         chikou_bullish = chikou > chikou_compare
         chikou_bearish = chikou < chikou_compare
         
+        # Count components agreement
+        components_bullish = 0
+        if price_above_cloud: components_bullish += 1
+        if cloud_bullish: components_bullish += 1
+        if chikou_bullish: components_bullish += 1
+        if tenkan > kijun: components_bullish += 1
+        if current_price > kijun: components_bullish += 1
+        
+        components_aligned = components_bullish / 5 * 100
+        
         # Strong bullish signals
         bullish = (
             (price_above_cloud and cloud_bullish and chikou_bullish) or
@@ -111,6 +128,19 @@ class IchimokuIndicator(BaseIndicator):
         if price_above_cloud or price_below_cloud:
             cloud_distance = abs(current_price - cloud_top) if price_above_cloud else abs(current_price - cloud_bottom)
             strength = min((cloud_distance / current_price) * 1000, 100)
+        else:
+            strength = 30
+        
+        # Signal type
+        if components_aligned > 80:
+            signal_type = "STRONG_BUY" if bullish else ("STRONG_SELL" if bearish else "NEUTRAL")
+        elif components_aligned > 60:
+            signal_type = "BUY" if bullish else ("SELL" if bearish else "NEUTRAL")
+        else:
+            signal_type = "WEAK" if bullish or bearish else "NEUTRAL"
+        
+        # Trend
+        trend = "STRONG_UPTREND" if (price_above_cloud and cloud_bullish) else ("UPTREND" if price_above_cloud else ("STRONG_DOWNTREND" if (price_below_cloud and not cloud_bullish) else ("DOWNTREND" if price_below_cloud else "SIDEWAYS")))
         
         return {
             "bullish": bullish,
@@ -127,7 +157,30 @@ class IchimokuIndicator(BaseIndicator):
                 "price_in_cloud": price_in_cloud,
                 "tk_cross": "bullish" if tk_bullish_cross else "bearish" if tk_bearish_cross else "none"
             },
-            "strength": strength
+            "strength": strength,
+            "signal_type": signal_type,
+            "confidence": components_aligned,
+            "trend": trend,
+            "reversal_signal": tk_bullish_cross or tk_bearish_cross,
+            "divergence": False,
+            "supporting_signals": [
+                f"Price: {current_price:.2f}",
+                f"Tenkan: {tenkan:.2f} {'(below)' if current_price < tenkan else '(above)'}",
+                f"Kijun: {kijun:.2f} {'(far below)' if current_price < kijun else ('(above)' if current_price > kijun else '')}",
+                f"Cloud: {cloud_bottom:.2f}-{cloud_top:.2f} ({'above price' if price_above_cloud else ('below price' if price_below_cloud else 'PRICE IN CLOUD')})",
+                f"Chikou: +{index - chikou_compare_idx} bars {'(ahead)' if chikou > chikou_compare else '(behind)'}",
+                f"Signal: {signal_type} ({components_bullish}/5 components agree)"
+            ],
+            "raw_values": {
+                "tenkan": tenkan,
+                "kijun": kijun,
+                "senkou_a": senkou_a,
+                "senkou_b": senkou_b,
+                "chikou": chikou,
+                "cloud_thickness": abs(senkou_a - senkou_b),
+                "components_aligned": components_aligned,
+                "ichimoku_strength": strength
+            }
         }
     
     def get_pine_script(self) -> str:

@@ -1,0 +1,37 @@
+{
+  "name": "MACD_Strategy",
+  "description": "MACD-based strategy - enters on histogram crossover",
+  "indicators": [
+    {
+      "type": "macd",
+      "id": "macd_12_26_9",
+      "enabled": true,
+      "params": {
+        "fast_period": 12,
+        "slow_period": 26,
+        "signal_period": 9
+      },
+      "bullish": true,
+      "bearish": true
+    }
+  ],
+  "signal_logic": {
+    "long_conditions": [
+      "macd_12_26_9_histogram > 0"
+    ],
+    "short_conditions": [
+      "macd_12_26_9_histogram < 0"
+    ]
+  },
+  "filters": {
+    "adx_filter": false,
+    "volume_filter": false,
+    "ma_filter": false
+  },
+  "risk_management": {
+    "position_size_percent": 2.0,
+    "stop_loss_percent": 2.0,
+    "take_profit_percent": 2.5,
+    "max_positions": 1
+  }
+}

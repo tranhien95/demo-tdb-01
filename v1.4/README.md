@@ -178,6 +178,29 @@ Backend đã cấu hình CORS cho `localhost:3000`. Nếu dùng port khác, upda
 allow_origins=["http://localhost:YOUR_PORT"]
 ```
 
+## 📚 Documentation
+
+Tất cả documentation đã được tổ chức trong thư mục `docs/`:
+
+- **Trading Improvements**: `docs/trading-improvements/`
+  - Trailing Stop Loss
+  - Breakeven Stop
+  - Integration guides
+  
+- **Live Trading**: `docs/live-trading/`
+  - Setup & Quick Start
+  - Implementation details
+  
+- **Indicators**: `docs/indicators/`
+  - Quick Reference
+  - Improvements & Summary
+  
+- **Setup**: `docs/setup/`
+  - Installation guides
+  - Binance configuration
+
+Xem `docs/README.md` để biết cấu trúc đầy đủ.
+
 ## 📄 License
 
 MIT

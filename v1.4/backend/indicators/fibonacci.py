@@ -29,7 +29,14 @@ class FibonacciIndicator(BaseIndicator):
                 "bullish": False,
                 "bearish": False,
                 "value": None,
-                "strength": 0
+                "strength": 0,
+                "signal_type": "NEUTRAL",
+                "confidence": 0,
+                "trend": "NEUTRAL",
+                "reversal_signal": False,
+                "divergence": False,
+                "supporting_signals": [],
+                "raw_values": {}
             }
         
         # Find swing high and low
@@ -49,31 +56,61 @@ class FibonacciIndicator(BaseIndicator):
         # Check if price is near any Fibonacci level
         near_level = None
         level_key = None
+        min_distance = float('inf')
         
         for key, fib_price in fib_levels.items():
             distance = abs(current_price - fib_price) / current_price
-            if distance <= tolerance:
+            if distance < min_distance:
+                min_distance = distance
                 near_level = fib_price
                 level_key = key
-                break
+        
+        at_level = min_distance <= tolerance
         
         # Determine trend direction
         recent_data = data[max(0, index - 5):index + 1]
         trend_up = recent_data[-1]['close'] > recent_data[0]['close']
         
-        # Bullish: Price bouncing from support levels (0.382, 0.5, 0.618) in uptrend
+        # Support vs Resistance
         support_levels = ['fib_0.382', 'fib_0.5', 'fib_0.618', 'fib_0.786']
-        bullish = near_level and level_key in support_levels and trend_up
-        
-        # Bearish: Price rejecting from resistance levels in downtrend
         resistance_levels = ['fib_0.236', 'fib_0.382', 'fib_0.5']
-        bearish = near_level and level_key in resistance_levels and not trend_up
         
-        # Strength based on how well price respects the level
+        is_support = at_level and level_key in support_levels
+        is_resistance = at_level and level_key in resistance_levels
+        
+        # Signals
+        bullish = is_support and trend_up
+        bearish = is_resistance and not trend_up
+        
+        # Strength based on level importance
+        level_weights = {
+            'fib_0.236': 1,
+            'fib_0.382': 2,
+            'fib_0.5': 3,
+            'fib_0.618': 4,  # Most important
+            'fib_0.786': 2,
+            'fib_0.0': 1
+        }
+        level_weight = level_weights.get(level_key, 1)
+        
+        # Strength calculation
         strength = 0
-        if near_level:
-            strength = (1 - abs(current_price - near_level) / (diff if diff > 0 else 1)) * 100
-            strength = max(0, min(100, strength))
+        if at_level:
+            strength = (1 - min_distance) * 100 * level_weight / 4
+        strength = min(strength, 100)
+        
+        # Signal type
+        if at_level:
+            if level_key == 'fib_0.618':
+                signal_type = "STRONG_SUPPORT" if is_support else ("STRONG_RESISTANCE" if is_resistance else "NEUTRAL")
+            elif level_key in ['fib_0.382', 'fib_0.5']:
+                signal_type = "SUPPORT" if is_support else ("RESISTANCE" if is_resistance else "NEUTRAL")
+            else:
+                signal_type = "WEAK_SUPPORT" if is_support else ("WEAK_RESISTANCE" if is_resistance else "NEUTRAL")
+        else:
+            signal_type = "NEUTRAL"
+        
+        trend = "AT_SUPPORT" if is_support else ("AT_RESISTANCE" if is_resistance else ("MOVING_DOWN" if not trend_up else "MOVING_UP"))
         
         return {
             "bullish": bullish,
@@ -86,7 +123,28 @@ class FibonacciIndicator(BaseIndicator):
                 "level_key": level_key,
                 "current_price": current_price
             },
-            "strength": strength
+            "strength": strength,
+            "signal_type": signal_type,
+            "confidence": strength,
+            "trend": trend,
+            "reversal_signal": at_level and (is_support or is_resistance),
+            "divergence": False,
+            "supporting_signals": [
+                f"Price: {current_price:.2f}",
+                f"0.618 level: {fib_levels.get('fib_0.618', 0):.2f} {'(support)' if is_support and level_key == 'fib_0.618' else ('(resistance)' if is_resistance and level_key == 'fib_0.618' else '')}",
+                f"Distance: {min_distance * 100:.2f}%",
+                f"Zone: {signal_type}",
+                f"Reversal probability: {'HIGH' if at_level else 'LOW'}"
+            ],
+            "raw_values": {
+                "trend_high": swing_high,
+                "trend_low": swing_low,
+                "fib_levels": fib_levels,
+                "nearest_level": level_key,
+                "distance_percent": min_distance * 100,
+                "price_alignment": min_distance,
+                "at_level": at_level
+            }
         }
     
     def get_pine_script(self) -> str:

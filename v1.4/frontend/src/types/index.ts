@@ -46,6 +46,8 @@ export interface Trade {
   time: string
   exit_time: string | null
   exit_reason?: string
+  balance_before?: number  // Balance before trade entry
+  balance_after?: number   // Balance after trade exit
 }
 
 export interface ComboResult {
@@ -124,6 +126,7 @@ export interface RiskManagement {
   reward_ratio: number
   stop_loss_percent: number
   capital: number  // Initial capital
+  margin?: number  // Margin/leverage (optional)
 }
 
 export interface Strategy {
@@ -150,20 +153,26 @@ export interface SignalDetail {
 }
 
 export interface BacktestResult {
+  status?: string
   total_trades: number
   winning_trades: number
   losing_trades: number
   win_rate: number
-  profit_pct: number
-  total_profit_usd: number  // Total profit in currency
+  profit_pct?: number  // Old field name for backwards compatibility
+  total_profit_pct?: number  // New field name
+  total_profit_usd?: number  // Old field name
+  total_profit?: number  // New field name
   profit_factor: number
   max_drawdown: number
   sharpe_ratio: number
-  long_trades: number  // Number of long trades
-  short_trades: number  // Number of short trades
+  long_trades: number
+  short_trades: number
   trades: Trade[]
-  signals: SignalDetail[]
-  equity_curve: number[]  // Balance after each trade
+  signals?: SignalDetail[]
+  equity_curve?: number[]
+  signals_found?: number
+  long_signals?: number
+  short_signals?: number
 }
 
 export interface StrategyListItem {

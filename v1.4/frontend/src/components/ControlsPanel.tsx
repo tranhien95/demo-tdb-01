@@ -152,10 +152,10 @@ export const ControlsPanel: React.FC = () => {
       <div className="mt-6 p-4 bg-primary/10 rounded-lg border-l-4 border-primary">
         <div className="font-bold text-secondary mb-2">💎 Recommended Quick Test:</div>
         <div className="text-sm text-gray-300">
-          Set Combo Size: 2-2 | Threshold: 70 | SL: 0.75% | RR: 2.0 | Disable Filters
+          Set Combo Size: 2-2 | Threshold: 70 | SL: 5.0% | RR: 1.0 | Disable Filters
         </div>
         <div className="text-xs text-gray-400 mt-1">
-          Expected: 10 trades, 60% WR, +6.00% profit
+          Expected: Better risk management, lower leverage
         </div>
       </div>
 

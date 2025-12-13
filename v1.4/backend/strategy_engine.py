@@ -4,9 +4,9 @@ Execute custom strategies with weighted indicators
 """
 
 from typing import List, Dict, Any, Tuple
-from strategy_models import (
+from strategy_models_simple import (
     Strategy, BacktestResult, BacktestTrade, 
-    SignalDetail, TradeSignal, IndicatorConfig
+    SignalDetail, SignalLogic, IndicatorConfig
 )
 from indicators import indicator_manager
 from indicators.base import HelperFunctions
@@ -112,17 +112,17 @@ class StrategyEngine:
         filters = strategy.filters
         
         # ADX Filter
-        if filters.enable_adx_filter:
+        if filters.enable_adx:
             adx_signal = indicator_manager.calculate_indicator('ADX', data, index, period=14)
             if adx_signal.get('value', 0) < filters.adx_threshold:
                 return False
         
         # Volume Filter
-        if filters.enable_volume_filter:
-            if index >= filters.volume_ma_period:
-                vol_ma = sum([data[j]['volume'] for j in range(index - filters.volume_ma_period, index)]) / filters.volume_ma_period
+        if filters.enable_volume:
+            if index >= 20:
+                vol_ma = sum([data[j]['volume'] for j in range(index - 20, index)]) / 20
                 current_vol = data[index]['volume']
-                if current_vol < vol_ma * filters.volume_multiplier:
+                if current_vol < vol_ma * filters.volume_threshold:
                     return False
         
         # MA Trend Filter
@@ -137,15 +137,15 @@ class StrategyEngine:
         
         # ATR Filter
         if filters.enable_atr_filter:
-            atr_val = HelperFunctions.atr(data, index, filters.atr_period)
-            if atr_val < filters.atr_min:
+            atr_val = HelperFunctions.atr(data, index, 14)
+            if atr_val < filters.min_atr:
                 return False
         
         # Trend Filter (EMA200)
         if filters.enable_trend_filter:
-            if index >= filters.trend_ema_period:
+            if index >= filters.trend_ma:
                 closes = [d['close'] for d in data[:index + 1]]
-                ema_vals = HelperFunctions.ema(closes, filters.trend_ema_period)
+                ema_vals = HelperFunctions.ema(closes, filters.trend_ma)
                 ema_val = ema_vals[index] if ema_vals[index] is not None else data[index]['close']
                 
                 if direction == 'LONG' and data[index]['close'] <= ema_val:
@@ -168,10 +168,10 @@ class StrategyEngine:
         """
         data = ohlcv_data
         risk_pct = strategy.risk_management.risk_percent
-        rr_ratio = strategy.risk_management.rr_ratio
-        sl_pct = strategy.risk_management.sl_percent
-        candle_confirmation = strategy.risk_management.candle_confirmation
+        rr_ratio = strategy.risk_management.reward_ratio
+        sl_pct = strategy.risk_management.stop_loss_percent
         capital = strategy.risk_management.capital
+        margin = strategy.risk_management.margin
         
         trades_list = []
         balance = capital
@@ -181,14 +181,22 @@ class StrategyEngine:
         long_trades = 0
         short_trades = 0
         current_position = None
+        entry_candle_index = None  # Track when position was entered
         
         last_signal = None
         signal_count = 0
+        switch_signal_count = 0  # Track confirmation for switch signals
+        last_switch_signal = None
         
         total_signals = 0
         long_signals = 0
         short_signals = 0
         equity_curve = [capital]  # Start with initial capital
+        
+        # Get switching controls from strategy
+        allow_switch = strategy.signal_logic.allow_position_switch
+        min_holding = strategy.signal_logic.min_holding_candles
+        switch_confirmation = strategy.signal_logic.switch_confirmation_candles
         
         # Backtest loop
         for i in range(50, len(data) - 1):
@@ -211,21 +219,44 @@ class StrategyEngine:
                 if not filter_passed:
                     direction = None
             
-            # Candle confirmation
+            # Candle confirmation for entry
             if direction and direction == last_signal:
                 signal_count += 1
             else:
                 last_signal = direction
                 signal_count = 1
             
-            should_enter = (
+            # Track switch signal confirmation separately
+            if current_position and direction and direction != current_position:
+                # This is a potential switch signal
+                if direction == last_switch_signal:
+                    switch_signal_count += 1
+                else:
+                    last_switch_signal = direction
+                    switch_signal_count = 1
+            else:
+                # Reset switch signal tracking if not a switch scenario
+                last_switch_signal = None
+                switch_signal_count = 0
+            
+            # Determine if we should enter (new position or switch)
+            should_enter_new = (
                 direction and
-                signal_count >= candle_confirmation and
-                (not current_position or current_position != direction)
+                signal_count >= 1 and
+                not current_position
             )
             
-            # Enter trade
-            if should_enter and not current_position:
+            # Determine if we should switch (with all checks)
+            should_switch = False
+            if allow_switch and current_position and direction and direction != current_position:
+                # Check minimum holding time
+                holding_time_ok = (entry_candle_index is None) or (i - entry_candle_index >= min_holding)
+                # Check switch confirmation
+                confirmation_ok = switch_signal_count >= switch_confirmation
+                should_switch = holding_time_ok and confirmation_ok
+            
+            # Enter new trade
+            if should_enter_new:
                 entry = data[i]['close']
                 sl = entry * (1 - sl_pct / 100) if direction == 'LONG' else entry * (1 + sl_pct / 100)
                 tp = entry + (entry - sl) * rr_ratio if direction == 'LONG' else entry - (sl - entry) * rr_ratio
@@ -249,16 +280,17 @@ class StrategyEngine:
                     'type': direction,
                     'time': data[i].get('time', ''),
                     'exit_time': None,
-                    'entry_signals': [s.dict() for s in signals_detail]
+                    'entry_signals': [s.dict() if hasattr(s, 'dict') else (s.model_dump() if hasattr(s, 'model_dump') else s.__dict__) for s in signals_detail]
                 })
                 current_position = direction
+                entry_candle_index = i  # Track when position was entered
                 if direction == 'LONG':
                     long_trades += 1
                 else:
                     short_trades += 1
             
-            # Switch position
-            elif should_enter and current_position and current_position != direction:
+            # Switch position (only if allowed and conditions met)
+            elif should_switch:
                 last_trade = trades_list[-1]
                 current_close = data[i]['close']
                 
@@ -280,6 +312,7 @@ class StrategyEngine:
                 
                 # Update balance with actual profit
                 balance += actual_profit_usd
+                last_trade['balance_after'] = round(balance, 2)  # Balance after closing trade
                 max_balance = max(max_balance, balance)
                 min_balance = min(min_balance, balance)
                 equity_curve.append(round(balance, 2))
@@ -308,9 +341,12 @@ class StrategyEngine:
                     'type': direction,
                     'time': data[i].get('time', ''),
                     'exit_time': None,
-                    'entry_signals': [s.dict() for s in signals_detail]
+                    'balance_before': round(balance, 2),  # Balance before new trade after switch
+                    'balance_after': None,  # Will be set when trade closes
+                    'entry_signals': [s.dict() if hasattr(s, 'dict') else (s.model_dump() if hasattr(s, 'model_dump') else s.__dict__) for s in signals_detail]
                 })
                 current_position = direction
+                entry_candle_index = i  # Track when new position was entered after switch
             
             # Check SL/TP
             elif current_position and len(trades_list) > 0:
@@ -359,10 +395,12 @@ class StrategyEngine:
                         
                         # Update balance with actual profit
                         balance += actual_profit_usd
+                        last_trade['balance_after'] = round(balance, 2)  # Balance after closing trade
                         max_balance = max(max_balance, balance)
                         min_balance = min(min_balance, balance)
                         equity_curve.append(round(balance, 2))
                         current_position = None
+                        entry_candle_index = None  # Reset entry tracking
         
         # Close last trade if open
         if current_position and len(trades_list) > 0:
@@ -384,6 +422,10 @@ class StrategyEngine:
                 
                 if profit > 0:
                     wins += 1
+                
+                # Update balance and set balance_after
+                balance += actual_profit_usd
+                last_trade['balance_after'] = round(balance, 2)
         
         # Calculate stats
         completed_trades = [t for t in trades_list if t['exit'] is not None]
@@ -404,38 +446,25 @@ class StrategyEngine:
             initial_capital=capital
         )
         
-        return BacktestResult(
-            strategy_name=strategy.name,
-            total_trades=total_trades,
-            wins=wins,
-            losses=losses,
-            win_rate=round(win_rate, 2),
-            profit_pct=round(total_profit_pct, 2),
-            total_profit_usd=round(total_profit_usd, 2),
-            profit_factor=all_metrics['profit_factor'],
-            draw_down=all_metrics['max_drawdown_pct'],
-            sharpe=all_metrics['sharpe_ratio'],
-            sortino_ratio=all_metrics['sortino_ratio'],
-            calmar_ratio=all_metrics['calmar_ratio'],
-            recovery_factor=all_metrics['recovery_factor'],
-            expectancy=all_metrics['expectancy'],
-            max_consecutive_losses=all_metrics['max_consecutive_losses'],
-            max_consecutive_wins=all_metrics['max_consecutive_wins'],
-            profit_per_trade=all_metrics['profit_per_trade'],
-            avg_win=all_metrics['avg_win'],
-            avg_loss=all_metrics['avg_loss'],
-            avg_win_pct=all_metrics['avg_win_pct'],
-            avg_loss_pct=all_metrics['avg_loss_pct'],
-            largest_win=all_metrics['largest_win'],
-            largest_loss=all_metrics['largest_loss'],
-            max_drawdown_value=all_metrics['max_drawdown_value'],
-            drawdown_duration=all_metrics['drawdown_duration'],
-            recovery_duration=all_metrics['recovery_duration'],
-            trades=[BacktestTrade(**t) for t in completed_trades[-200:]],
-            total_signals=total_signals,
-            long_signals=long_signals,
-            short_signals=short_signals,
-            long_trades=long_trades,
-            short_trades=short_trades,
-            equity_curve=equity_curve
-        )
+        # Prepare result - skip BacktestResult dataclass conversion for simplicity
+        result = {
+            'status': 'success',
+            'total_trades': total_trades,
+            'winning_trades': wins,
+            'losing_trades': losses,
+            'win_rate': round(win_rate, 2),
+            'profit_factor': all_metrics['profit_factor'],
+            'total_profit': round(total_profit_usd, 2),
+            'total_profit_pct': round(total_profit_pct, 2),
+            'max_drawdown': all_metrics['max_drawdown_pct'],
+            'sharpe_ratio': all_metrics['sharpe_ratio'],
+            'trades': completed_trades[-200:],  # Keep trades as plain dicts
+            'long_trades': long_trades,
+            'short_trades': short_trades,
+            'signals_found': total_signals,
+            'long_signals': long_signals,
+            'short_signals': short_signals,
+            'equity_curve': equity_curve
+        }
+        
+        return result

@@ -20,6 +20,24 @@ export const ResultsTable: React.FC = () => {
     setShowChart(true)
   }
 
+  const handleLoadToBuilder = (combo: ComboResult) => {
+    // Parse combo string to get indicators
+    const indicators = combo.combo.split(' + ').map(indName => ({
+      type: indName.trim(),
+      config: {},
+      weight: 1.0,
+      enabled: true
+    }))
+
+    // Save to localStorage for Strategy Builder to load
+    localStorage.setItem('optimizedCombo', JSON.stringify({
+      indicators: indicators,
+      threshold: 70 // Default threshold
+    }))
+
+    alert(`✅ Đã lưu combo "${combo.combo}"! Vào Strategy Builder để load và test chi tiết.`)
+  }
+
   const handleGenerateScript = async (combo: ComboResult) => {
     const indicators = combo.combo.split(' + ')
     try {
@@ -119,15 +137,28 @@ export const ResultsTable: React.FC = () => {
                   <td className="p-4 text-center">{result.draw_down}%</td>
                   <td className="p-4 text-center">{result.sharpe}</td>
                   <td className="p-4 text-center">
-                    <button
-                      className="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-sm font-bold"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleGenerateScript(result)
-                      }}
-                    >
-                      📝 Script
-                    </button>
+                    <div className="flex gap-2 justify-center">
+                      <button
+                        className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm font-bold"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleLoadToBuilder(result)
+                        }}
+                        title="Load vào Strategy Builder"
+                      >
+                        💾 Load
+                      </button>
+                      <button
+                        className="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-sm font-bold"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleGenerateScript(result)
+                        }}
+                        title="Generate Pine Script"
+                      >
+                        📝 Script
+                      </button>
+                    </div>
                   </td>
                 </tr>
               )
