@@ -1,12 +1,12 @@
 """
-Binance API Routes
-Endpoints for fetching data from Binance
+Vietnam Stock Market API Routes
+Endpoints for fetching data from Vietnam stock market (HOSE, HNX, UPCOM)
 """
 
 from fastapi import APIRouter, Request
 from datetime import datetime
-from binance_fetcher import get_binance_fetcher
-from api.models import BinanceRequest
+from vnstock_fetcher import get_vnstock_fetcher
+from api.models import BinanceRequest  # Reuse same model structure
 from api.exceptions import (
     ValidationException,
     NotFoundException,
@@ -18,54 +18,56 @@ import json
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/api/binance", tags=["binance"])
+router = APIRouter(prefix="/api/vnstock", tags=["vnstock"])
 
 
 @router.get("/symbols")
 @handle_exceptions
-async def get_binance_symbols():
-    """Get list of popular symbols from Binance"""
+async def get_vnstock_symbols():
+    """Get list of popular Vietnam stock symbols"""
     try:
-        fetcher = get_binance_fetcher()
+        fetcher = get_vnstock_fetcher()
         symbols = fetcher.get_available_symbols()
         return {
             'status': 'success',
             'symbols': symbols,
             'count': len(symbols)
         }
+    except ImportError as e:
+        raise ExternalServiceException("VNStock", f"vnstock library not installed: {str(e)}")
     except Exception as e:
-        raise ExternalServiceException("Binance", f"Failed to fetch symbols: {str(e)}")
+        raise ExternalServiceException("VNStock", f"Failed to fetch symbols: {str(e)}")
 
 
 @router.get("/timeframes")
 @handle_exceptions
-async def get_binance_timeframes():
+async def get_vnstock_timeframes():
     """Get list of available timeframes"""
     try:
-        fetcher = get_binance_fetcher()
+        fetcher = get_vnstock_fetcher()
         timeframes = fetcher.get_timeframes()
         return {
             'status': 'success',
             'timeframes': timeframes
         }
+    except ImportError as e:
+        raise ExternalServiceException("VNStock", f"vnstock library not installed: {str(e)}")
     except Exception as e:
-        raise ExternalServiceException("Binance", f"Failed to fetch timeframes: {str(e)}")
+        raise ExternalServiceException("VNStock", f"Failed to fetch timeframes: {str(e)}")
 
 
 @router.post("/fetch")
 @handle_exceptions
-async def fetch_binance_data(request: BinanceRequest):
-    """Fetch OHLCV data from Binance
+async def fetch_vnstock_data(request: BinanceRequest):  # Reuse BinanceRequest model
+    """Fetch OHLCV data from Vietnam stock market
     
     Can use either:
     - limit: Number of candles to fetch (50-10000)
     - start_date and end_date: Date range (format: 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS')
     """
     # Debug: print request details
-    print(f"[API Route] Received BinanceRequest: symbol={request.symbol}, timeframe={request.timeframe}")
+    print(f"[API Route] Received VNStockRequest: symbol={request.symbol}, timeframe={request.timeframe}")
     print(f"[API Route] limit={request.limit}, start_date={request.start_date}, end_date={request.end_date}")
-    print(f"[API Route] Request model_dump: {request.model_dump()}")
-    print(f"[API Route] Request type: {type(request)}")
     
     logger.info(f"Received request: symbol={request.symbol}, timeframe={request.timeframe}, limit={request.limit}, start_date={request.start_date}, end_date={request.end_date}")
     
@@ -95,7 +97,7 @@ async def fetch_binance_data(request: BinanceRequest):
             raise ValidationException(f"Invalid date format: {str(e)}")
     
     try:
-        fetcher = get_binance_fetcher()
+        fetcher = get_vnstock_fetcher()
         
         # Validate symbol
         if not fetcher.validate_symbol(request.symbol):
@@ -103,7 +105,7 @@ async def fetch_binance_data(request: BinanceRequest):
         
         # Fetch data - pass start_date and end_date if provided
         fetch_kwargs = {
-            'symbol': request.symbol,
+            'symbol': request.symbol.upper(),  # Uppercase for Vietnam stocks
             'timeframe': request.timeframe,
         }
         
@@ -133,12 +135,14 @@ async def fetch_binance_data(request: BinanceRequest):
             'end_date': request.end_date
         }
     
+    except ImportError as e:
+        raise ExternalServiceException("VNStock", f"vnstock library not installed: {str(e)}")
     except (ValidationException, NotFoundException):
         raise
     except ValueError as e:
         raise ValidationException(str(e))
     except Exception as e:
-        raise ExternalServiceException("Binance", f"Failed to fetch data: {str(e)}")
+        raise ExternalServiceException("VNStock", f"Failed to fetch data: {str(e)}")
 
 
 @router.get("/symbol-info/{symbol}")
@@ -149,8 +153,8 @@ async def get_symbol_info(symbol: str):
         raise ValidationException("Symbol is required")
     
     try:
-        fetcher = get_binance_fetcher()
-        info = fetcher.get_symbol_info(symbol)
+        fetcher = get_vnstock_fetcher()
+        info = fetcher.get_symbol_info(symbol.upper())
         
         if not info:
             raise NotFoundException("Symbol", symbol)
@@ -159,8 +163,10 @@ async def get_symbol_info(symbol: str):
             'status': 'success',
             'data': info
         }
+    except ImportError as e:
+        raise ExternalServiceException("VNStock", f"vnstock library not installed: {str(e)}")
     except (ValidationException, NotFoundException):
         raise
     except Exception as e:
-        raise ExternalServiceException("Binance", f"Failed to get symbol info: {str(e)}")
+        raise ExternalServiceException("VNStock", f"Failed to get symbol info: {str(e)}")
 

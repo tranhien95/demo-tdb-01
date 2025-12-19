@@ -24,7 +24,13 @@ const defaultParams: OptimizationParams = {
   enableVolatilityFilter: false,
   minATR: 0.5,
   minSignalStrength: 70,
-  maxCombos: 0
+  maxCombos: 0,
+  // Advanced Exit Settings
+  enableTrailingStop: true,
+  trailingActivationR: 1.0,
+  trailingMultiplier: 1.5,
+  enablePartialTPClose: false,
+  tpClosePct: 0.5
 }
 
 export const useOptimizerStore = create<OptimizerState>((set) => ({

@@ -219,7 +219,8 @@ class StrategyEngine:
                 if not filter_passed:
                     direction = None
             
-            # Candle confirmation for entry
+            # Candle confirmation for entry (use candle_confirmation from strategy)
+            candle_confirmation = strategy.signal_logic.candle_confirmation
             if direction and direction == last_signal:
                 signal_count += 1
             else:
@@ -242,7 +243,7 @@ class StrategyEngine:
             # Determine if we should enter (new position or switch)
             should_enter_new = (
                 direction and
-                signal_count >= 1 and
+                signal_count >= candle_confirmation and
                 not current_position
             )
             
@@ -280,6 +281,7 @@ class StrategyEngine:
                     'type': direction,
                     'time': data[i].get('time', ''),
                     'exit_time': None,
+                    'trailing_activated': False,  # Track if trailing stop is active
                     'entry_signals': [s.dict() if hasattr(s, 'dict') else (s.model_dump() if hasattr(s, 'model_dump') else s.__dict__) for s in signals_detail]
                 })
                 current_position = direction
@@ -296,6 +298,29 @@ class StrategyEngine:
                 
                 profit = current_close - last_trade['entry'] if current_position == 'LONG' else last_trade['entry'] - current_close
                 profit_pct = (profit / last_trade['entry']) * 100
+                
+                # Calculate profit in R (risk units)
+                # R = profit_pct / sl_pct
+                # sl_pct is already defined at line 172
+                profit_r = profit_pct / sl_pct if sl_pct > 0 else 0
+                
+                # Check if we should switch based on profit condition
+                min_profit_r = strategy.signal_logic.min_profit_r_to_switch
+                should_switch_by_profit = False
+                
+                if min_profit_r < 0:
+                    # Negative value: only switch if losing (protect capital)
+                    should_switch_by_profit = profit_r < 0
+                elif min_profit_r == 0:
+                    # Zero: always allow switch (original behavior)
+                    should_switch_by_profit = True
+                else:
+                    # Positive value: only switch if profit >= min_profit_r OR losing
+                    should_switch_by_profit = profit_r >= min_profit_r or profit_r < 0
+                
+                if not should_switch_by_profit:
+                    # Skip switch - keep position open to let profit run
+                    continue
                 
                 # Calculate actual USD profit based on position size
                 position_size = last_trade['position_size']
@@ -348,8 +373,55 @@ class StrategyEngine:
                 current_position = direction
                 entry_candle_index = i  # Track when new position was entered after switch
             
+            # Update trailing stop (if enabled) BEFORE checking SL/TP
+            if current_position and len(trades_list) > 0:
+                last_trade = trades_list[-1]
+                if last_trade.get('exit') is None and strategy.signal_logic.enable_trailing_stop:
+                    # Calculate ATR
+                    from indicators.base import HelperFunctions
+                    atr = HelperFunctions.atr(data, i, 14)
+                    
+                    if atr > 0:
+                        entry = last_trade['entry']
+                        initial_sl = last_trade['sl']
+                        current_close = data[i]['close']
+                        
+                        # Calculate profit in R
+                        initial_sl_distance = abs(entry - initial_sl)
+                        if initial_sl_distance > 0:
+                            if current_position == 'LONG':
+                                profit = current_close - entry
+                                profit_pct = (profit / entry) * 100
+                            else:  # SHORT
+                                profit = entry - current_close
+                                profit_pct = (profit / entry) * 100
+                            
+                            sl_distance_pct = (initial_sl_distance / entry) * 100
+                            profit_r = profit_pct / sl_distance_pct if sl_distance_pct > 0 else 0
+                            
+                            # Check if trailing should activate
+                            activation_r = strategy.signal_logic.trailing_activation_r
+                            if profit_r >= activation_r:
+                                # Calculate trailing distance
+                                trailing_multiplier = strategy.signal_logic.trailing_multiplier
+                                trailing_distance = atr * trailing_multiplier
+                                
+                                # Update trailing stop
+                                if current_position == 'LONG':
+                                    new_sl = current_close - trailing_distance
+                                    # Only move SL up, never down
+                                    if new_sl > last_trade['sl']:
+                                        last_trade['sl'] = new_sl
+                                        last_trade['trailing_activated'] = True
+                                else:  # SHORT
+                                    new_sl = current_close + trailing_distance
+                                    # Only move SL down, never up
+                                    if new_sl < last_trade['sl']:
+                                        last_trade['sl'] = new_sl
+                                        last_trade['trailing_activated'] = True
+            
             # Check SL/TP
-            elif current_position and len(trades_list) > 0:
+            if current_position and len(trades_list) > 0:
                 last_trade = trades_list[-1]
                 
                 if last_trade.get('exit') is None:
@@ -359,22 +431,64 @@ class StrategyEngine:
                     exit_price = None
                     exit_reason = None
                     
-                    # Check TP
+                    # Check TP - handle partial close if configured
+                    enable_partial_tp = strategy.signal_logic.enable_partial_tp_close
+                    tp_close_pct = strategy.signal_logic.tp_close_pct if enable_partial_tp else 1.0
                     if current_position == 'LONG' and current_high >= last_trade['tp']:
-                        exit_price = last_trade['tp']
-                        exit_reason = 'TP'
+                        if enable_partial_tp and tp_close_pct < 1.0:
+                            # Close partial position at TP, keep remainder with trailing stop
+                            exit_price = last_trade['tp']
+                            # Calculate partial profit
+                            profit = exit_price - last_trade['entry']
+                            profit_pct = (profit / last_trade['entry']) * 100
+                            position_size = last_trade['position_size']
+                            partial_profit_usd = position_size * (profit_pct / 100) * tp_close_pct
+                            
+                            # Update position size (reduce by tp_close_pct)
+                            last_trade['position_size'] = position_size * (1 - tp_close_pct)
+                            last_trade['partial_tp_closed'] = True
+                            last_trade['partial_tp_profit'] = round(partial_profit_usd, 4)
+                            
+                            # Remove TP so remaining position can run with trailing stop
+                            last_trade['tp'] = float('inf')
+                            balance += partial_profit_usd
+                            print(f"[TP] Closed {tp_close_pct*100:.0f}% @ TP (${partial_profit_usd:.2f}), keeping {100-tp_close_pct*100:.0f}% with trailing stop")
+                        else:
+                            # Close full position at TP (original behavior)
+                            exit_price = last_trade['tp']
+                            exit_reason = 'TP'
                     elif current_position == 'SHORT' and current_low <= last_trade['tp']:
-                        exit_price = last_trade['tp']
-                        exit_reason = 'TP'
+                        if enable_partial_tp and tp_close_pct < 1.0:
+                            # Close partial position at TP, keep remainder with trailing stop
+                            exit_price = last_trade['tp']
+                            # Calculate partial profit
+                            profit = last_trade['entry'] - exit_price
+                            profit_pct = (profit / last_trade['entry']) * 100
+                            position_size = last_trade['position_size']
+                            partial_profit_usd = position_size * (profit_pct / 100) * tp_close_pct
+                            
+                            # Update position size (reduce by tp_close_pct)
+                            last_trade['position_size'] = position_size * (1 - tp_close_pct)
+                            last_trade['partial_tp_closed'] = True
+                            last_trade['partial_tp_profit'] = round(partial_profit_usd, 4)
+                            
+                            # Remove TP so remaining position can run with trailing stop
+                            last_trade['tp'] = float('-inf')
+                            balance += partial_profit_usd
+                            print(f"[TP] Closed {tp_close_pct*100:.0f}% @ TP (${partial_profit_usd:.2f}), keeping {100-tp_close_pct*100:.0f}% with trailing stop")
+                        else:
+                            # Close full position at TP (original behavior)
+                            exit_price = last_trade['tp']
+                            exit_reason = 'TP'
                     
-                    # Check SL
+                    # Check SL (including trailing stop)
                     if not exit_reason:
                         if current_position == 'LONG' and current_low <= last_trade['sl']:
                             exit_price = last_trade['sl']
-                            exit_reason = 'SL'
+                            exit_reason = 'TRAILING_SL' if last_trade.get('trailing_activated') else 'SL'
                         elif current_position == 'SHORT' and current_high >= last_trade['sl']:
                             exit_price = last_trade['sl']
-                            exit_reason = 'SL'
+                            exit_reason = 'TRAILING_SL' if last_trade.get('trailing_activated') else 'SL'
                     
                     if exit_price and exit_reason:
                         profit = exit_price - last_trade['entry'] if current_position == 'LONG' else last_trade['entry'] - exit_price
@@ -383,6 +497,10 @@ class StrategyEngine:
                         # Calculate actual USD profit based on position size
                         position_size = last_trade['position_size']
                         actual_profit_usd = position_size * (profit_pct / 100)
+                        
+                        # If partial TP was closed, add that profit
+                        if last_trade.get('partial_tp_closed'):
+                            actual_profit_usd += last_trade.get('partial_tp_profit', 0)
                         
                         last_trade['exit'] = round(exit_price, 2)
                         last_trade['exit_time'] = data[i].get('time', '')

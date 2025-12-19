@@ -10,6 +10,11 @@ alembic==1.12.1
 # Data & API
 ccxt==4.0.97
 python-dateutil==2.8.2
+vnstock>=0.2.6  # Vietnam stock market data (primary)
+stockvip>=0.1.0  # Alternative Vietnam stock market data (optional)
+yfinance>=0.2.0  # Yahoo Finance (supports some VN stocks with .VN suffix)
+pandas>=2.0.0  # Required by vnstock, stockvip, and yfinance
+requests>=2.31.0  # For web scraping (optional)
 
 # Optional: For production
 # python-multipart==0.0.6  # For file uploads

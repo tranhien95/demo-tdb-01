@@ -146,12 +146,39 @@ class PineScriptGenerator:
         code_parts.append('\n'.join(header_lines))
         
         # Pine Script version and strategy declaration
+        # IMPORTANT: Settings to match Python backtest
+        # - default_qty_type=strategy.fixed (uses fixed quantity, not percentage)
+        #   NOTE: We use qty= parameter in strategy.entry() which overrides defaults,
+        #   but please ensure TradingView Settings → Order Size → Type is set to "Fixed"
+        #   to avoid any potential conflicts with UI settings
         code_parts.append(f'''//@version=5
 strategy("{strategy.name}", overlay=true, 
-         default_qty_type=strategy.percent_of_equity, 
-         default_qty_value={strategy.risk_management.risk_percent},
+         default_qty_type=strategy.fixed,
+         default_qty_value=0,  // Set to 0 to ensure qty= parameter in strategy.entry() is used
          initial_capital={strategy.risk_management.capital},
-         currency=currency.USD)
+         currency=currency.USD,
+         commission_type=strategy.commission.percent,
+         commission_value=0.0,
+         slippage=0,
+         pyramiding=0,
+         calc_on_order_fills=false,
+         close_entries_rule="ANY")
+
+// ==================== CRITICAL SETTINGS CHECK ====================
+// ⚠️ BEFORE RUNNING BACKTEST, CHECK TradingView Settings:
+// 1. Click "Settings" button (⚙️) on the chart
+// 2. Go to "Properties" tab
+// 3. Find "Kích thước lệnh mặc định" (Default Order Size)
+// 4. SET VALUE TO 0 (zero) or leave it empty
+// 5. OR set Type to "Fixed" if available
+// 
+// ⚠️ If you see "1 hợp đồng" (1 contract) in trade list, Settings are WRONG!
+// The script calculates qty dynamically based on risk (position_size = ~$2000)
+// If Settings override to 1 contract, you'll get ~7% profit instead of ~91%
+//
+// This script uses qty= parameter in strategy.entry() calls
+// With default_qty_value=0, TradingView should use the calculated qty
+// But UI Settings can still override it, so check Settings carefully!
 ''')
         
         # Indicator declarations
@@ -242,54 +269,141 @@ ema_trend = ta.ema(close, {filters.trend_ma})''')
         bullish_parts = []
         bearish_parts = []
         
-        for ind_id, ind_info in indicator_vars.items():
-            weight = ind_info['weight']
-            contribution = weight / total_weight * 100
-            
-            code_parts.append(f"// {ind_info['type']} contributes {contribution:.2f}%")
-            bullish_parts.append(f"({ind_info['bullish_var']} ? {weight} : 0)")
-            bearish_parts.append(f"({ind_info['bearish_var']} ? {weight} : 0)")
+        # Check if this is a combo optimizer strategy (count-based) or strategy builder (weighted)
+        # Combo Optimizer uses count-based: each indicator counts as 1, then divide by total count
+        # Strategy Builder uses weighted: sum of weights, then divide by total weight
+        # Default to count-based for combo optimizer compatibility
+        use_count_based = True  # Always use count-based to match combo optimizer
         
-        code_parts.append(f'''
-// Weighted signal calculation
-total_weight = {total_weight}
-bullish_weight = {' + '.join(bullish_parts)}
-bearish_weight = {' + '.join(bearish_parts)}
+        if use_count_based:
+            # Count-based signal calculation (matching Combo Optimizer logic)
+            for ind_id, ind_info in indicator_vars.items():
+                code_parts.append(f"// {ind_info['type']} contributes 1 count")
+                bullish_parts.append(f"({ind_info['bullish_var']} ? 1 : 0)")
+                bearish_parts.append(f"({ind_info['bearish_var']} ? 1 : 0)")
+            
+            total_indicators_count = len(indicator_vars)
+            code_parts.append(f'''
+// Signal calculation (count-based, matching Combo Optimizer logic)
+// Count how many indicators are bullish/bearish
+total_indicators = {total_indicators_count}.0  // Total number of indicators
+bullish_count = {' + '.join(bullish_parts)}
+bearish_count = {' + '.join(bearish_parts)}
 
-bullish_percent = bullish_weight / total_weight * 100
-bearish_percent = bearish_weight / total_weight * 100
+// Calculate percentages (count-based, matching Combo Optimizer)
+bullish_percent = (bullish_count / total_indicators) * 100
+bearish_percent = (bearish_count / total_indicators) * 100
 
 // Threshold: {strategy.signal_logic.threshold_percent}%
-var bool long_signal = false
-var bool short_signal = false
-long_signal := bullish_percent >= {strategy.signal_logic.threshold_percent}
-short_signal := bearish_percent >= {strategy.signal_logic.threshold_percent}''')
+// Entry type (matches Python: entry_type is set based on threshold, BEFORE filters)
+// This is what Python uses to update signal_count
+entry_type_long = bullish_percent >= {strategy.signal_logic.threshold_percent}
+entry_type_short = bearish_percent >= {strategy.signal_logic.threshold_percent}
+
+// Candle confirmation (require signal to appear {strategy.signal_logic.candle_confirmation} candles in a row)
+// CRITICAL: In Python, signal_count is updated based on entry_type (threshold-based, BEFORE filters)
+// This matches Python logic: signal_count tracks threshold-based signals, filters are checked separately
+var int long_signal_count = 0
+var int short_signal_count = 0
+var string last_signal_type = ""
+
+// Update signal counts (match Python logic exactly)
+// Python: if entry_type and entry_type == last_signal: signal_count += 1
+//         else: last_signal = entry_type; signal_count = 1
+if entry_type_long
+    if last_signal_type == "LONG"
+        long_signal_count := long_signal_count + 1
+    else
+        long_signal_count := 1
+    short_signal_count := 0
+    last_signal_type := "LONG"
+else if entry_type_short
+    if last_signal_type == "SHORT"
+        short_signal_count := short_signal_count + 1
+    else
+        short_signal_count := 1
+    long_signal_count := 0
+    last_signal_type := "SHORT"
+else
+    // No entry_type: Python sets signal_count = 1, last_signal = None
+    // We reset to 0 to prevent entry (since confirmed signal requires count >= candle_confirmation)
+    // This matches Python: when entry_type=None, should_enter=False anyway (entry_type is False)
+    long_signal_count := 0
+    short_signal_count := 0
+    last_signal_type := ""
+
+// Confirmed signals (require {strategy.signal_logic.candle_confirmation} consecutive candles)
+// This matches Python: signal_count >= candle_confirmation
+var bool long_signal_confirmed = false
+var bool short_signal_confirmed = false
+long_signal_confirmed := long_signal_count >= {strategy.signal_logic.candle_confirmation}
+short_signal_confirmed := short_signal_count >= {strategy.signal_logic.candle_confirmation}''')
         
-        # Apply filters
+        # Apply filters AFTER signal confirmation (matching Python logic)
+        # In Python: signal_count is updated based on entry_type (threshold), then filters block entry
+        # So we apply filters to the confirmed signals
+        code_parts.append("\n// Apply filters (matching Python: filters block entry, but signal_count already updated)")
+        code_parts.append("var bool long_signal = false")
+        code_parts.append("var bool short_signal = false")
+        
         if filter_conditions or filters.enable_ma_filter or filters.enable_trend_filter:
-            code_parts.append("\n// Apply filters")
-            
             all_filters = filter_conditions.copy()
             
+            # Build filter conditions
+            filter_parts_long = []
+            filter_parts_short = []
+            
             if filters.enable_ma_filter:
-                code_parts.append("long_signal := long_signal and close > ma_trend")
-                code_parts.append("short_signal := short_signal and close < ma_trend")
+                filter_parts_long.append("close > ma_trend")
+                filter_parts_short.append("close < ma_trend")
             
             if filters.enable_trend_filter:
-                code_parts.append("long_signal := long_signal and close > ema_trend")
-                code_parts.append("short_signal := short_signal and close < ema_trend")
+                filter_parts_long.append("close > ema_trend")
+                filter_parts_short.append("close < ema_trend")
             
             if all_filters:
-                filters_combined = " and ".join(all_filters)
-                code_parts.append(f"long_signal := long_signal and {filters_combined}")
-                code_parts.append(f"short_signal := short_signal and {filters_combined}")
+                filters_str = " and ".join(all_filters)
+                filter_parts_long.append(filters_str)
+                filter_parts_short.append(filters_str)
+            
+            # Combine filters
+            if filter_parts_long:
+                filters_long_combined = " and ".join(filter_parts_long)
+                code_parts.append(f"long_signal := long_signal_confirmed and {filters_long_combined}")
+            else:
+                code_parts.append("long_signal := long_signal_confirmed")
+                
+            if filter_parts_short:
+                filters_short_combined = " and ".join(filter_parts_short)
+                code_parts.append(f"short_signal := short_signal_confirmed and {filters_short_combined}")
+            else:
+                code_parts.append("short_signal := short_signal_confirmed")
+        else:
+            # No filters, use confirmed signals directly
+            code_parts.append("long_signal := long_signal_confirmed")
+            code_parts.append("short_signal := short_signal_confirmed")
         
         # Entry/Exit Logic
         code_parts.append(f'''
 // ==================== ENTRY/EXIT ====================
 // Risk Management
+risk_percent = {strategy.risk_management.risk_percent}
 sl_percent = {strategy.risk_management.stop_loss_percent}
 rr_ratio = {strategy.risk_management.reward_ratio}
+initial_capital = {strategy.risk_management.capital}
+
+// Calculate position size based on risk (match Python backtest logic)
+// IMPORTANT: Use initial_capital (fixed), NOT strategy.equity (which changes with balance)
+// This matches Python backtest which uses fixed capital for position sizing
+// Risk amount = capital * risk_pct / 100
+// Position size = risk_amount / (sl_pct / 100)
+// Quantity = position_size / entry_price
+calculate_qty(entry_price) =>
+    // Use fixed initial_capital, not strategy.equity (matches Python backtest)
+    risk_amount = initial_capital * risk_percent / 100
+    position_size = risk_amount / (sl_percent / 100)
+    qty = position_size / entry_price
+    qty
 
 // Calculate SL and TP prices
 var float long_sl = na
@@ -297,35 +411,138 @@ var float long_tp = na
 var float short_sl = na
 var float short_tp = na
 
+// TP partial close configuration
+enable_partial_tp = {('true' if (hasattr(strategy.signal_logic, 'enable_partial_tp_close') and strategy.signal_logic.enable_partial_tp_close) else 'false')}
+tp_close_pct = {strategy.signal_logic.tp_close_pct if hasattr(strategy.signal_logic, 'tp_close_pct') else 1.0}
+enable_trailing = {('true' if (hasattr(strategy.signal_logic, 'enable_trailing_stop') and strategy.signal_logic.enable_trailing_stop) else 'true')}
+trailing_activation_r = {strategy.signal_logic.trailing_activation_r if hasattr(strategy.signal_logic, 'trailing_activation_r') else 1.0}
+trailing_multiplier = {strategy.signal_logic.trailing_multiplier if hasattr(strategy.signal_logic, 'trailing_multiplier') else 1.5}
+
+// Calculate ATR for trailing stop
+atr_period = 14
+atr = ta.atr(atr_period)
+
 // Long Entry
 if long_signal and strategy.position_size == 0
     long_sl := close * (1 - sl_percent / 100)
     long_tp := close + (close - long_sl) * rr_ratio
-    strategy.entry("Long", strategy.long)
-    strategy.exit("Long Exit", "Long", stop=long_sl, limit=long_tp)
+    qty_long = calculate_qty(close)
+    strategy.entry("Long", strategy.long, qty=qty_long)
+    
+    // If enable_partial_tp and tp_close_pct < 1.0, use partial TP close + trailing stop
+    if enable_partial_tp and tp_close_pct < 1.0
+        // Close partial position at TP
+        qty_tp = qty_long * tp_close_pct
+        strategy.exit("Long TP Partial", "Long", qty=qty_tp, limit=long_tp)
+        // Keep remainder with trailing stop (will be handled by trailing logic below)
+    else
+        // Close full position at TP (original behavior)
+        strategy.exit("Long Exit", "Long", stop=long_sl, limit=long_tp)
 
 // Short Entry
 if short_signal and strategy.position_size == 0
     short_sl := close * (1 + sl_percent / 100)
     short_tp := close - (short_sl - close) * rr_ratio
-    strategy.entry("Short", strategy.short)
-    strategy.exit("Short Exit", "Short", stop=short_sl, limit=short_tp)
+    qty_short = calculate_qty(close)
+    strategy.entry("Short", strategy.short, qty=qty_short)
+    
+    // If enable_partial_tp and tp_close_pct < 1.0, use partial TP close + trailing stop
+    if enable_partial_tp and tp_close_pct < 1.0
+        // Close partial position at TP
+        qty_tp = qty_short * tp_close_pct
+        strategy.exit("Short TP Partial", "Short", qty=qty_tp, limit=short_tp)
+        // Keep remainder with trailing stop (will be handled by trailing logic below)
+    else
+        // Close full position at TP (original behavior)
+        strategy.exit("Short Exit", "Short", stop=short_sl, limit=short_tp)
 
-// Position Switch - Long to Short
+// Position Switch - Short to Long (close SHORT position, enter LONG)
+// In TradingView, close and entry on same bar can cause issues
+// Close first, then entry (TradingView will execute both on same bar close price)
 if long_signal and strategy.position_size < 0
-    strategy.close("Short")
+    strategy.close("Short")  // Close SHORT position
     long_sl := close * (1 - sl_percent / 100)
     long_tp := close + (close - long_sl) * rr_ratio
-    strategy.entry("Long", strategy.long)
-    strategy.exit("Long Exit", "Long", stop=long_sl, limit=long_tp)
+    qty_long = calculate_qty(close)
+    strategy.entry("Long", strategy.long, qty=qty_long)
+    
+    // If enable_partial_tp and tp_close_pct < 1.0, use partial TP close + trailing stop
+    if enable_partial_tp and tp_close_pct < 1.0
+        qty_tp = qty_long * tp_close_pct
+        strategy.exit("Long TP Partial", "Long", qty=qty_tp, limit=long_tp)
+    else
+        strategy.exit("Long Exit", "Long", stop=long_sl, limit=long_tp)
 
-// Position Switch - Short to Long
+// Position Switch - Long to Short (close LONG position, enter SHORT)
+// In TradingView, close and entry on same bar can cause issues
+// Close first, then entry (TradingView will execute both on same bar close price)
 if short_signal and strategy.position_size > 0
-    strategy.close("Long")
+    strategy.close("Long")  // Close LONG position
     short_sl := close * (1 + sl_percent / 100)
     short_tp := close - (short_sl - close) * rr_ratio
-    strategy.entry("Short", strategy.short)
-    strategy.exit("Short Exit", "Short", stop=short_sl, limit=short_tp)''')
+    qty_short = calculate_qty(close)
+    strategy.entry("Short", strategy.short, qty=qty_short)
+    
+    // If enable_partial_tp and tp_close_pct < 1.0, use partial TP close + trailing stop
+    if enable_partial_tp and tp_close_pct < 1.0
+        qty_tp = qty_short * tp_close_pct
+        strategy.exit("Short TP Partial", "Short", qty=qty_tp, limit=short_tp)
+    else
+        strategy.exit("Short Exit", "Short", stop=short_sl, limit=short_tp)
+
+// ==================== TRAILING STOP FOR REMAINING POSITION ====================
+// Note: Pine Script has limitations for complex trailing stop after partial TP
+// This is a simplified implementation - full trailing stop logic is better handled in Python backtest
+// For remaining position after partial TP close, use TradingView's built-in trailing stop feature
+// OR manually update SL each bar (complex and may cause repainting issues)
+
+// Basic trailing stop logic with auto-adjustment based on timeframe (ATR size)
+// Auto-adjust trailing parameters based on ATR % to handle different timeframes
+// Larger ATR (higher timeframe) needs larger multiplier to avoid premature stops
+if enable_trailing
+    // Calculate ATR as percentage of price (to detect timeframe)
+    atr_pct = (atr / close) * 100
+    
+    // Auto-adjust multiplier and activation R based on ATR size (timeframe)
+    // 15m: ATR ~0.1-0.3%, 1h: ATR ~0.3-0.8%, 1D: ATR ~1-3%
+    adjusted_multiplier = atr_pct > 1.0 ? trailing_multiplier * 2.0 : atr_pct > 0.5 ? trailing_multiplier * 1.5 : trailing_multiplier
+    adjusted_activation_r = atr_pct > 1.0 ? trailing_activation_r * 1.5 : atr_pct > 0.5 ? trailing_activation_r * 1.2 : trailing_activation_r
+    
+    // For LONG: Update SL if profit >= activation R (with adjusted activation R)
+    if strategy.position_size > 0
+        entry_price = strategy.opentrades.entry_price(strategy.opentrades - 1)
+        if not na(entry_price) and not na(long_sl)
+            initial_sl_distance = math.abs(entry_price - long_sl)
+            if initial_sl_distance > 0
+                profit_r = (close - entry_price) / initial_sl_distance
+                // Use adjusted activation R (auto-adjusted for timeframe)
+                if profit_r >= adjusted_activation_r
+                    // Use adjusted multiplier (auto-adjusted for timeframe)
+                    trailing_distance = atr * adjusted_multiplier
+                    trailing_sl = close - trailing_distance
+                    // Only move SL up
+                    if trailing_sl > long_sl
+                        long_sl := trailing_sl
+                        // Update exit order with new trailing SL
+                        strategy.exit("Long Trailing", "Long", stop=long_sl)
+    
+    // For SHORT: Update SL if profit >= activation R (with adjusted activation R)
+    if strategy.position_size < 0
+        entry_price = strategy.opentrades.entry_price(strategy.opentrades - 1)
+        if not na(entry_price) and not na(short_sl)
+            initial_sl_distance = math.abs(short_sl - entry_price)
+            if initial_sl_distance > 0
+                profit_r = (entry_price - close) / initial_sl_distance
+                // Use adjusted activation R (auto-adjusted for timeframe)
+                if profit_r >= adjusted_activation_r
+                    // Use adjusted multiplier (auto-adjusted for timeframe)
+                    trailing_distance = atr * adjusted_multiplier
+                    trailing_sl = close + trailing_distance
+                    // Only move SL down
+                    if trailing_sl < short_sl
+                        short_sl := trailing_sl
+                        // Update exit order with new trailing SL
+                        strategy.exit("Short Trailing", "Short", stop=short_sl)''')
         
         # Plotting
         code_parts.append('''

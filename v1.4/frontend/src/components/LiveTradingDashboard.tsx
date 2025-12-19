@@ -97,6 +97,8 @@ const LiveTradingDashboard: React.FC = () => {
   const [showConfig, setShowConfig] = useState(true);
   const [strategyJson, setStrategyJson] = useState('');
   const [uploadedStrategyName, setUploadedStrategyName] = useState('');
+  const [usePineScript, setUsePineScript] = useState(false);
+  const [pineCode, setPineCode] = useState('');
 
   // Load strategies on mount
   useEffect(() => {
@@ -162,17 +164,54 @@ const LiveTradingDashboard: React.FC = () => {
 
   const startTrading = async () => {
     try {
-      const res = await fetch('http://localhost:4000/api/live-trading/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      });
-      const data = await res.json();
-      setState(data.state);
-      setIsRunning(true);
-      setShowConfig(false);
-    } catch (error) {
-      alert('Error starting trading: ' + error);
+      if (usePineScript && pineCode.trim()) {
+        // Start with Pine Script
+        const res = await fetch('http://localhost:4000/api/live-trading/start-pine', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            symbol: config.symbol,
+            timeframe: config.timeframe,
+            pine_code: pineCode,
+            initial_balance: config.initial_balance,
+            risk_percent: config.risk_percent,
+            margin: config.margin,
+            stoploss_percent: config.stoploss_percent,
+            reversal_strength_threshold: config.reversal_strength_threshold,
+            max_positions: config.max_positions,
+          }),
+        });
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({ detail: 'Failed to start trading' }));
+          throw new Error(errorData.detail || 'Failed to start trading');
+        }
+        const data = await res.json();
+        setState(data.state);
+        setIsRunning(true);
+        setShowConfig(false);
+        alert(`✅ Started live trading with Pine Script!\nStrategy: ${data.strategy_name}\nIndicators: ${data.parsed_indicators?.join(', ') || 'N/A'}`);
+      } else {
+        // Start with saved strategy
+        if (!config.strategy_name) {
+          alert('Please select a strategy or provide Pine Script code');
+          return;
+        }
+        const res = await fetch('http://localhost:4000/api/live-trading/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(config),
+        });
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({ detail: 'Failed to start trading' }));
+          throw new Error(errorData.detail || 'Failed to start trading');
+        }
+        const data = await res.json();
+        setState(data.state);
+        setIsRunning(true);
+        setShowConfig(false);
+      }
+    } catch (error: any) {
+      alert('Error starting trading: ' + (error.message || error));
     }
   };
 
@@ -293,20 +332,63 @@ const LiveTradingDashboard: React.FC = () => {
                 </select>
               </div>
 
-              {/* Strategy */}
-              <div>
-                <label className="block text-sm font-medium mb-2">Strategy</label>
-                <select
-                  value={config.strategy_name}
-                  onChange={(e) => setConfig({ ...config, strategy_name: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white"
-                >
-                  <option value="">Select strategy...</option>
-                  {strategies.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
+              {/* Strategy Selection Mode */}
+              <div className="md:col-span-2 lg:col-span-3">
+                <label className="block text-sm font-medium mb-2">Strategy Source</label>
+                <div className="flex gap-4 mb-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      checked={!usePineScript}
+                      onChange={() => setUsePineScript(false)}
+                      className="w-4 h-4"
+                    />
+                    <span>Saved Strategy</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      checked={usePineScript}
+                      onChange={() => setUsePineScript(true)}
+                      className="w-4 h-4"
+                    />
+                    <span>📝 Pine Script Code</span>
+                  </label>
+                </div>
               </div>
+
+              {/* Strategy Select (when not using Pine Script) */}
+              {!usePineScript && (
+                <div className="md:col-span-2 lg:col-span-3">
+                  <label className="block text-sm font-medium mb-2">Strategy</label>
+                  <select
+                    value={config.strategy_name}
+                    onChange={(e) => setConfig({ ...config, strategy_name: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white"
+                  >
+                    <option value="">Select strategy...</option>
+                    {strategies.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Pine Script Code (when using Pine Script) */}
+              {usePineScript && (
+                <div className="md:col-span-2 lg:col-span-3">
+                  <label className="block text-sm font-medium mb-2">Pine Script Code</label>
+                  <textarea
+                    value={pineCode}
+                    onChange={(e) => setPineCode(e.target.value)}
+                    placeholder="//@version=5&#10;strategy(&quot;My Strategy&quot;, overlay=true)&#10;// Paste your Pine Script code here..."
+                    className="w-full h-48 px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm font-mono placeholder-gray-400"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Paste Pine Script v5 code. Strategy will be parsed and used for live trading.
+                  </p>
+                </div>
+              )}
 
               {/* Load Strategy JSON */}
               <div className="md:col-span-2 lg:col-span-3">
@@ -402,10 +484,10 @@ const LiveTradingDashboard: React.FC = () => {
 
             <button
               onClick={startTrading}
-              disabled={!config.strategy_name}
-              className="w-full py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 rounded-lg font-bold transition"
+              disabled={(!usePineScript && !config.strategy_name) || (usePineScript && !pineCode.trim())}
+              className="w-full py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg font-bold transition"
             >
-              ▶️ START TRADING
+              ▶️ START TRADING {usePineScript ? 'WITH PINE SCRIPT' : ''}
             </button>
           </div>
         )}

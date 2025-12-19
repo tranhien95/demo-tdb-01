@@ -31,6 +31,12 @@ export interface OptimizationParams {
   minATR: number
   minSignalStrength: number
   maxCombos: number
+  // Advanced Exit Settings
+  enableTrailingStop: boolean
+  trailingActivationR: number
+  trailingMultiplier: number
+  enablePartialTPClose: boolean
+  tpClosePct: number
 }
 
 export interface Trade {
@@ -106,6 +112,11 @@ export interface IndicatorConfig {
 
 export interface SignalLogic {
   threshold_percent: number
+  enable_partial_tp_close?: boolean
+  tp_close_pct?: number
+  enable_trailing_stop?: boolean
+  trailing_activation_r?: number
+  trailing_multiplier?: number
 }
 
 export interface FilterConfig {

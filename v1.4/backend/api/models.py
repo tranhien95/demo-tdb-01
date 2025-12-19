@@ -3,8 +3,9 @@ API Models
 Pydantic models for API requests/responses
 """
 
-from pydantic import BaseModel
-from typing import List, Dict, Any
+from pydantic import BaseModel, Field, ConfigDict
+from typing import List, Dict, Any, Optional
+from datetime import datetime
 
 
 class OHLCV(BaseModel):
@@ -19,25 +20,44 @@ class OHLCV(BaseModel):
 
 class OptimizationParams(BaseModel):
     """Parameters for optimization endpoint"""
-    ohlcv_data: List[OHLCV]
-    min_combo_size: int = 2
-    max_combo_size: int = 3
+    model_config = ConfigDict(populate_by_name=True)  # Allow both snake_case and camelCase
+    
+    ohlcv_data: List[OHLCV]  # Required field, frontend sends as 'ohlcv_data'
+    min_combo_size: int = Field(default=2, alias='minComboSize')
+    max_combo_size: int = Field(default=3, alias='maxComboSize')
     threshold: int = 70
-    risk_percent: float = 10.0
-    rr_ratio: float = 2.0
-    sl_percent: float = 0.75
+    risk_percent: float = Field(default=10.0, alias='riskPercent')
+    rr_ratio: float = Field(default=2.0, alias='rrRatio')
+    sl_percent: float = Field(default=0.75, alias='slPercent')
     filters: Dict[str, Any] = {}
-    max_combos: int = 0
-    min_signal_ratio: int = 70
-    candle_confirmation: int = 2
+    max_combos: int = Field(default=0, alias='maxCombos')
+    min_signal_ratio: int = Field(default=70, alias='minSignalStrength')
+    candle_confirmation: int = Field(default=2, alias='candleConfirmation')
+    capital: float = 1000.0  # Initial capital
     
     # Additional Filters
-    enable_adx_filter: bool = False
-    adx_threshold: float = 25.0
-    enable_volume_filter: bool = False
-    volume_ma_period: int = 20
-    enable_ma_filter: bool = False
-    ma_period: int = 50
+    enable_adx_filter: bool = Field(default=False, alias='enableADXFilter')
+    adx_threshold: float = Field(default=25.0, alias='adxThreshold')
+    enable_volume_filter: bool = Field(default=False, alias='enableVolumeFilter')
+    volume_ma_period: int = Field(default=20, alias='volumeThreshold')
+    enable_ma_filter: bool = Field(default=False, alias='enableMAFilter')
+    ma_period: int = Field(default=50, alias='maValue')
+    enable_trend_filter: bool = Field(default=False, alias='enableTrendFilter')
+    trend_ma: int = Field(default=200, alias='trendMA')
+    enable_volatility_filter: bool = Field(default=False, alias='enableVolatilityFilter')
+    min_atr: float = Field(default=0.5, alias='minATR')
+    
+    # Advanced Exit Settings
+    enable_trailing_stop: bool = Field(default=True, alias='enableTrailingStop')
+    trailing_activation_r: float = Field(default=1.0, alias='trailingActivationR')
+    trailing_multiplier: float = Field(default=1.5, alias='trailingMultiplier')
+    enable_partial_tp_close: bool = Field(default=False, alias='enablePartialTPClose')
+    tp_close_pct: float = Field(default=0.5, alias='tpClosePct')
+    
+    # Additional fields from frontend that may not be used in backend
+    min_win_rate: float = Field(default=50.0, alias='minWinRate', exclude=True)
+    min_profit: float = Field(default=0.0, alias='minProfit', exclude=True)
+    min_trades: int = Field(default=10, alias='minTrades', exclude=True)
 
 
 class BacktestResult(BaseModel):
@@ -58,7 +78,9 @@ class BinanceRequest(BaseModel):
     """Binance API request model"""
     symbol: str
     timeframe: str
-    limit: int = 200
+    limit: Optional[int] = None  # Optional if using date range
+    start_date: Optional[str] = None  # Format: 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS'
+    end_date: Optional[str] = None  # Format: 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS'
 
 
 class BinanceResponse(BaseModel):
@@ -68,6 +90,15 @@ class BinanceResponse(BaseModel):
     count: int
     ohlcv_data: List[OHLCV]
     fetched_at: str
+
+
+class VNStockRequest(BaseModel):
+    """VNStock API request model"""
+    symbol: str
+    timeframe: str
+    limit: Optional[int] = None  # Optional if using date range
+    start_date: Optional[str] = None  # Format: 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS'
+    end_date: Optional[str] = None  # Format: 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS'
 
 
 class LiveTradingStartRequest(BaseModel):

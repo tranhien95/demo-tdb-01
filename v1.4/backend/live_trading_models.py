@@ -61,6 +61,9 @@ class TradingConfig:
         {"r_level": 1.0, "close_pct": 0.5, "taken": False},
         {"r_level": 2.0, "close_pct": 0.25, "taken": False}
     ])  # Partial exit rules
+    
+    # TP handling when trend continues
+    tp_close_pct: float = 0.5  # Close % of position when TP hit (0.5 = 50%, 1.0 = 100%). Keep remainder with trailing stop
     # Multi-timeframe settings
     enable_multi_timeframe: bool = True  # Enable multi-timeframe confirmation
     higher_timeframe: str = "1h"  # Higher timeframe for trend filter

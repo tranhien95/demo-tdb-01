@@ -1,17 +1,17 @@
 import React, { useState, useEffect } from 'react'
-import { binanceAPI } from '../services/api'
+import { dnseAPI } from '../services/api'
 import { useOptimizerStore } from '../store/optimizerStore'
 import { OHLCV } from '../types'
 
-export const BinanceDataFetcher: React.FC = () => {
+export const DNSEDataFetcher: React.FC = () => {
   const { setCsvData, setProgress } = useOptimizerStore()
   
   const [symbols, setSymbols] = useState<string[]>([])
   const [timeframes, setTimeframes] = useState<Record<string, string>>({})
   
-  const [selectedSymbol, setSelectedSymbol] = useState('BTC/USDT')
-  const [selectedTimeframe, setSelectedTimeframe] = useState('15m')
-  const [limit, setLimit] = useState(2000)
+  const [selectedSymbol, setSelectedSymbol] = useState('VCB')
+  const [selectedTimeframe, setSelectedTimeframe] = useState('1d')
+  const [limit, setLimit] = useState(1000)
   const [useDateRange, setUseDateRange] = useState(false)
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
@@ -19,6 +19,7 @@ export const BinanceDataFetcher: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [warning, setWarning] = useState('')
 
   // Helper function to format date for datetime-local input
   const formatDateForInput = (date: Date): string => {
@@ -30,13 +31,13 @@ export const BinanceDataFetcher: React.FC = () => {
     return `${year}-${month}-${day}T${hours}:${minutes}`
   }
 
-  // Initialize default dates: 1 month ago to now
+  // Initialize default dates: 1 year ago to now
   const getDefaultDates = () => {
     const now = new Date()
-    const oneMonthAgo = new Date(now)
-    oneMonthAgo.setMonth(now.getMonth() - 1)
+    const oneYearAgo = new Date(now)
+    oneYearAgo.setFullYear(now.getFullYear() - 1)
     return {
-      start: formatDateForInput(oneMonthAgo),
+      start: formatDateForInput(oneYearAgo),
       end: formatDateForInput(now)
     }
   }
@@ -46,7 +47,20 @@ export const BinanceDataFetcher: React.FC = () => {
     loadAvailableOptions()
   }, [])
 
-  // Set default dates (1 month ago to now) when useDateRange is enabled
+  // Fallback symbols if API fails
+  const fallbackSymbols = ['VCB', 'VIC', 'VHM', 'VRE', 'VNM', 'HPG', 'MSN', 'TCB', 'BID', 'CTG', 'VPB', 'SSI', 'FPT', 'VJC', 'MWG', 'PNJ', 'GAS', 'PLX', 'POW', 'GVR']
+  const fallbackTimeframes: Record<string, string> = {
+    '1': '1 phút',
+    '5': '5 phút',
+    '15': '15 phút',
+    '30': '30 phút',
+    '1h': '1 giờ',
+    '1d': '1 ngày',
+    '1w': '1 tuần',
+    '1M': '1 tháng'
+  }
+
+  // Set default dates when useDateRange is enabled
   useEffect(() => {
     if (useDateRange) {
       const defaults = getDefaultDates()
@@ -57,24 +71,43 @@ export const BinanceDataFetcher: React.FC = () => {
 
   const loadAvailableOptions = async () => {
     try {
+      setError('')
+      setWarning('')
+      
       const [symbolsRes, timeframesRes] = await Promise.all([
-        binanceAPI.getSymbols(),
-        binanceAPI.getTimeframes()
+        dnseAPI.getSymbols(),
+        dnseAPI.getTimeframes()
       ])
-      setSymbols(symbolsRes.symbols)
-      setTimeframes(timeframesRes.timeframes)
-    } catch (err) {
-      setError('Không thể tải danh sách symbol/timeframe: ' + (err as Error).message)
+      
+      if (symbolsRes.status === 'warning' || timeframesRes.status === 'warning') {
+        const warningMsg = symbolsRes.message || timeframesRes.message || 'DNSE/yfinance API tạm thời không khả dụng'
+        setWarning(warningMsg)
+      } else if (symbolsRes.status === 'success' || !symbolsRes.status) {
+        setWarning('')
+      }
+      
+      setSymbols(symbolsRes.symbols || fallbackSymbols)
+      setTimeframes(timeframesRes.timeframes || fallbackTimeframes)
+    } catch (err: any) {
+      const errorMsg = err.message || String(err)
+      setSymbols(fallbackSymbols)
+      setTimeframes(fallbackTimeframes)
+      
+      if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError')) {
+        setWarning('⚠️ Không thể kết nối đến server. Đang dùng danh sách mã mặc định. Vui lòng kiểm tra backend server.')
+      } else {
+        setWarning('⚠️ ' + errorMsg + '. Đang dùng danh sách mã mặc định.')
+      }
     }
   }
 
   const handleFetchData = async () => {
     setError('')
     setSuccess('')
+    setWarning('')
     setLoading(true)
 
     try {
-      // Validate date range if using it
       let formattedStartDate = ''
       let formattedEndDate = ''
       
@@ -86,30 +119,28 @@ export const BinanceDataFetcher: React.FC = () => {
           throw new Error('Ngày bắt đầu phải trước ngày kết thúc')
         }
         
-        // Convert datetime-local format (YYYY-MM-DDTHH:mm) to backend format (YYYY-MM-DD HH:MM:SS)
-        // datetime-local returns format like "2024-01-01T12:00"
         formattedStartDate = startDate.replace('T', ' ')
         if (formattedStartDate.split(':').length === 2) {
-          formattedStartDate += ':00' // Add seconds if missing
+          formattedStartDate += ':00'
         }
         
         formattedEndDate = endDate.replace('T', ' ')
         if (formattedEndDate.split(':').length === 2) {
-          formattedEndDate += ':00' // Add seconds if missing
+          formattedEndDate += ':00'
         }
       }
 
       setProgress({ isRunning: true, percent: 10, tested: 0, withTrades: 0 })
 
       const response = useDateRange
-        ? await binanceAPI.fetchData(selectedSymbol, selectedTimeframe, undefined, formattedStartDate, formattedEndDate)
-        : await binanceAPI.fetchData(selectedSymbol, selectedTimeframe, limit)
+        ? await dnseAPI.fetchData(selectedSymbol, selectedTimeframe, undefined, formattedStartDate, formattedEndDate)
+        : await dnseAPI.fetchData(selectedSymbol, selectedTimeframe, limit)
 
       if (response.status !== 'success') {
-        throw new Error(response.message || 'Fetch failed')
+        const errorMsg = response.message || response.detail || 'Fetch failed'
+        throw new Error(errorMsg)
       }
 
-      // Convert to OHLCV format
       const ohlcvData: OHLCV[] = response.ohlcv_data.map((candle: any) => ({
         time: candle.time,
         open: candle.open,
@@ -127,7 +158,8 @@ export const BinanceDataFetcher: React.FC = () => {
       
       setProgress({ isRunning: false, percent: 100, tested: 0, withTrades: 0 })
     } catch (err) {
-      setError('❌ Lỗi: ' + (err as Error).message)
+      const errMsg = (err as Error).message
+      setError('❌ Lỗi: ' + errMsg)
       setProgress({ isRunning: false, percent: 0, tested: 0, withTrades: 0 })
     } finally {
       setLoading(false)
@@ -136,13 +168,12 @@ export const BinanceDataFetcher: React.FC = () => {
 
   return (
     <div className="p-6 bg-white rounded-lg shadow-md border border-gray-200">
-      <h2 className="text-2xl font-bold mb-4 text-gray-800">📊 Lấy Data từ Binance</h2>
+      <h2 className="text-2xl font-bold mb-4 text-gray-800">📈 Lấy Data từ DNSE/YFinance</h2>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-        {/* Symbol Selection */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Symbol
+            Mã Cổ Phiếu
           </label>
           <select
             value={selectedSymbol}
@@ -158,7 +189,6 @@ export const BinanceDataFetcher: React.FC = () => {
           </select>
         </div>
 
-        {/* Timeframe Selection */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Timeframe
@@ -177,7 +207,6 @@ export const BinanceDataFetcher: React.FC = () => {
           </select>
         </div>
 
-        {/* Limit Selection */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Số Candles
@@ -194,7 +223,6 @@ export const BinanceDataFetcher: React.FC = () => {
         </div>
       </div>
 
-      {/* Date Range Toggle */}
       <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
         <label className="flex items-center gap-2 cursor-pointer mb-3">
           <input
@@ -207,7 +235,6 @@ export const BinanceDataFetcher: React.FC = () => {
           <span className="text-sm font-medium text-gray-700">Sử dụng khoảng thời gian (từ ngày đến ngày)</span>
         </label>
 
-        {/* Date Range Inputs */}
         {useDateRange && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
             <div>
@@ -238,40 +265,67 @@ export const BinanceDataFetcher: React.FC = () => {
         )}
       </div>
 
-      {/* Fetch Button */}
       <div className="mb-4">
         <button
           onClick={handleFetchData}
           disabled={loading || !selectedSymbol || !selectedTimeframe || (useDateRange && (!startDate || !endDate))}
-          className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition shadow-md hover:shadow-lg"
+          className="w-full px-6 py-3 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition shadow-md hover:shadow-lg"
         >
-          {loading ? '⏳ Đang tải...' : '📥 Tải Data từ Binance'}
+          {loading ? '⏳ Đang tải...' : '📥 Tải Data từ DNSE/YFinance'}
         </button>
       </div>
 
-      {/* Status Messages */}
+      {warning && (
+        <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800">
+          <div className="flex items-start gap-2">
+            <span className="text-xl">⚠️</span>
+            <div className="flex-1">
+              <p className="font-semibold mb-1">Cảnh báo:</p>
+              <p className="whitespace-pre-line text-sm">{warning}</p>
+            </div>
+          </div>
+        </div>
+      )}
       {error && (
         <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
-          {error}
+          <div className="flex items-start gap-2">
+            <span className="text-xl">❌</span>
+            <div className="flex-1">
+              <p className="font-semibold mb-1">Lỗi:</p>
+              <p className="whitespace-pre-line text-sm">{error}</p>
+            </div>
+          </div>
         </div>
       )}
       {success && (
         <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg text-green-700">
-          {success}
+          <div className="flex items-start gap-2">
+            <span className="text-xl">✅</span>
+            <div className="flex-1">
+              <p className="font-semibold mb-1">Thành công:</p>
+              <p className="text-sm">{success}</p>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Info */}
-      <div className="text-sm text-gray-600 bg-blue-50 p-4 rounded-lg border border-blue-100">
-        <p>💡 <strong>Tip:</strong> Chọn symbol, timeframe, và:</p>
+      <div className="text-sm text-gray-600 bg-purple-50 p-4 rounded-lg border border-purple-100">
+        <p>💡 <strong>Tip:</strong> DNSE/YFinance hỗ trợ một số mã cổ phiếu VN (với .VN suffix)</p>
         <ul className="list-disc list-inside mt-1 ml-2">
           <li>Số lượng candles (50-10000), hoặc</li>
           <li>Khoảng thời gian (từ ngày đến ngày)</li>
         </ul>
-        <p className="mt-2">🔗 <strong>Symbols:</strong> BTC, ETH, BNB, XRP, SOL, ADA, DOGE, v.v...</p>
-        <p>⏱️ <strong>Timeframes:</strong> 1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w</p>
+        <p className="mt-2">🔗 <strong>Mã cổ phiếu phổ biến:</strong> VCB, VIC, VHM, HPG, MSN, TCB, BID, CTG, VPB, SSI, FPT, VJC, v.v...</p>
+        <p>⏱️ <strong>Timeframes:</strong> 1 phút, 5 phút, 15 phút, 30 phút, 1 giờ, 1 ngày, 1 tuần, 1 tháng</p>
         <p className="mt-2">📅 <strong>Date Range:</strong> Chọn checkbox để tải data theo khoảng thời gian cụ thể</p>
+        <p className="mt-2 text-orange-600">⚠️ <strong>Lưu ý:</strong></p>
+        <ul className="list-disc list-inside mt-1 ml-2 text-orange-600">
+          <li>YFinance có thể không hỗ trợ đầy đủ mã VN</li>
+          <li>Một số mã có thể cần thêm .VN suffix (VD: VCB.VN)</li>
+          <li>Nếu không tìm thấy data, thử mã khác hoặc dùng vnstock</li>
+        </ul>
       </div>
     </div>
   )
 }
+

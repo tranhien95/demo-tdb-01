@@ -4,14 +4,15 @@ Endpoints for strategy management and backtesting
 """
 
 from fastapi import APIRouter, Request, Body
-from pydantic import ValidationError
-from typing import Optional, Dict, Any
+from pydantic import ValidationError, BaseModel
+from typing import Optional, Dict, Any, List
 from indicators import indicator_manager
 from strategy_models import Strategy, BacktestRequest
 from strategy_engine import StrategyEngine
 # Use database storage instead of JSON
 from strategy_storage_db import strategy_storage
 from pine_script_generator import pine_script_generator
+from pine_script_parser import PineScriptParser
 from api.exceptions import (
     ValidationException,
     NotFoundException,
@@ -218,4 +219,50 @@ async def export_pine_script(
     """
     result = pine_script_generator.generate(strategy, backtest_result, version)
     return result.model_dump()
+
+
+class BacktestPineScriptRequest(BaseModel):
+    """Request to backtest Pine Script code"""
+    pine_code: str
+    ohlcv_data: List[Dict[str, Any]]
+
+
+@router.post("/backtest-pine")
+@handle_exceptions
+async def backtest_pine_script(request: BacktestPineScriptRequest = Body(...)):
+    """
+    Parse Pine Script code and run backtest
+    
+    This endpoint:
+    1. Parses Pine Script code to extract strategy parameters
+    2. Converts to Strategy object
+    3. Runs backtest using Python engine
+    
+    Note: This is a simplified parser. For full accuracy, you may need
+    to manually verify the extracted parameters.
+    """
+    try:
+        logger.info("Parsing Pine Script code for backtesting...")
+        
+        # Parse Pine Script to Strategy
+        strategy = PineScriptParser.parse_to_strategy(request.pine_code)
+        
+        logger.info(f"Parsed strategy: {strategy.name}")
+        logger.info(f"Indicators: {[ind.type for ind in strategy.indicators]}")
+        logger.info(f"Threshold: {strategy.signal_logic.threshold_percent}%")
+        logger.info(f"Candle confirmation: {strategy.signal_logic.candle_confirmation}")
+        
+        # Run backtest
+        result = StrategyEngine.backtest_strategy(strategy, request.ohlcv_data)
+        
+        return {
+            "status": "success",
+            "strategy_name": strategy.name,
+            "parsed_indicators": [ind.type for ind in strategy.indicators],
+            "backtest_result": result.model_dump()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error backtesting Pine Script: {str(e)}", exc_info=True)
+        raise InternalServerException(f"Failed to backtest Pine Script: {str(e)}")
 

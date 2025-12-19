@@ -20,9 +20,16 @@ class IndicatorConfig(BaseModel):
 class SignalLogic(BaseModel):
     """Signal confirmation logic"""
     threshold_percent: float = Field(default=70.0, ge=0, le=100, description="Minimum % of weighted agreement needed")
+    candle_confirmation: int = Field(default=1, ge=1, le=10, description="Candles needed to confirm entry signal")
     min_holding_candles: int = Field(default=3, ge=1, le=100, description="Minimum candles to hold position before allowing switch")
     switch_confirmation_candles: int = Field(default=2, ge=1, le=10, description="Candles needed to confirm switch signal")
     allow_position_switch: bool = Field(default=True, description="Enable/disable position switching")
+    min_profit_r_to_switch: float = Field(default=-1.0, ge=-5.0, le=5.0, description="Minimum profit R to allow switch (-1 = only switch if losing to protect capital, 0 = always allow, 0.5 = need 0.5R profit)")
+    enable_trailing_stop: bool = Field(default=True, description="Enable trailing stop loss in backtest")
+    trailing_activation_r: float = Field(default=1.0, ge=0.0, le=5.0, description="Activate trailing when profit >= this R value")
+    trailing_multiplier: float = Field(default=1.5, ge=0.5, le=5.0, description="ATR multiplier for trailing distance")
+    enable_partial_tp_close: bool = Field(default=False, description="Enable partial TP close - close % of position at TP, keep remainder with trailing stop")
+    tp_close_pct: float = Field(default=0.5, ge=0.0, le=1.0, description="Close % of position when TP hit (0.5 = 50%, 1.0 = 100%). Only used if enable_partial_tp_close is True")
 
 
 class FilterConfig(BaseModel):

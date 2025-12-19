@@ -5,8 +5,9 @@ import { StrategyBuilder } from './components/StrategyBuilder'
 import { ComboOptimizer } from './components/ComboOptimizer'
 import LiveTradingDashboard from './components/LiveTradingDashboard'
 import { AdminPanel } from './components/AdminPanel'
+import { PineScriptTester } from './components/PineScriptTester'
 
-type ScreenMode = 'data' | 'strategy' | 'combo-optimizer' | 'live-trading' | 'admin'
+type ScreenMode = 'data' | 'strategy' | 'combo-optimizer' | 'live-trading' | 'admin' | 'pine-tester'
 
 function App() {
   const { csvData } = useOptimizerStore()
@@ -16,6 +17,7 @@ function App() {
     { mode: 'data', label: 'Data Manager', icon: '📊', description: 'Upload/Fetch data' },
     { mode: 'strategy', label: 'Strategy Builder', icon: '🎯', description: 'Build custom strategy' },
     { mode: 'combo-optimizer', label: 'Combo Optimizer', icon: '⚙️', description: 'Optimize indicator combos with advanced settings' },
+    { mode: 'pine-tester', label: 'Pine Script Tester', icon: '📝', description: 'Test Pine Script code directly' },
     { mode: 'live-trading', label: 'Live Trading', icon: '📈', description: 'Real-time trading' },
     { mode: 'admin', label: 'Admin', icon: '🔧', description: 'System management' },
   ]
@@ -65,6 +67,7 @@ function App() {
           {activeMode === 'data' && <DataManager />}
           {activeMode === 'strategy' && <StrategyBuilder />}
           {activeMode === 'combo-optimizer' && <ComboOptimizer />}
+          {activeMode === 'pine-tester' && <PineScriptTester />}
           {activeMode === 'live-trading' && <LiveTradingDashboard />}
           {activeMode === 'admin' && <AdminPanel />}
         </main>

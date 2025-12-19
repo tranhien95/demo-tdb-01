@@ -39,7 +39,10 @@ class BacktestEngine:
     @staticmethod
     def backtest_combo(combo: List[str], ohlcv_data: List[Dict], threshold: int,
                       risk_pct: float, rr_ratio: float, sl_pct: float, filters: Dict, 
-                      min_signal_ratio: int = 50, candle_confirmation: int = 2) -> Dict:
+                      min_signal_ratio: int = 50, candle_confirmation: int = 2,
+                      enable_trailing_stop: bool = True, trailing_activation_r: float = 1.0,
+                      trailing_multiplier: float = 1.5, enable_partial_tp_close: bool = False,
+                      tp_close_pct: float = 0.5) -> Dict:
         """Backtest a single indicator combination"""
         
         if not ohlcv_data or len(ohlcv_data) < 50:
@@ -180,7 +183,8 @@ class BacktestEngine:
                     'profit_pct': None,
                     'type': entry_type,
                     'time': ohlcv_data[i].get('time', ''),
-                    'exit_time': None
+                    'exit_time': None,
+                    'trailing_activated': False  # Track if trailing stop is active
                 })
                 current_position = entry_type
             
@@ -225,11 +229,74 @@ class BacktestEngine:
                     'profit_pct': None,
                     'type': entry_type,
                     'time': ohlcv_data[i].get('time', ''),
-                    'exit_time': None
+                    'exit_time': None,
+                    'trailing_activated': False  # Track if trailing stop is active
                 })
                 current_position = entry_type
             
+            # Update trailing stop (if enabled) BEFORE checking SL/TP
             elif current_position and len(trades_list) > 0:
+                last_trade = trades_list[-1]
+                if last_trade.get('exit') is None and enable_trailing_stop:
+                    # Calculate ATR
+                    from indicators.base import HelperFunctions
+                    atr = HelperFunctions.atr(ohlcv_data, i, 14)
+                    
+                    if atr > 0:
+                        entry = last_trade['entry']
+                        initial_sl = last_trade['sl']
+                        current_close = ohlcv_data[i]['close']
+                        
+                        # Calculate profit in R
+                        initial_sl_distance = abs(entry - initial_sl)
+                        if initial_sl_distance > 0:
+                            if current_position == 'LONG':
+                                profit = current_close - entry
+                                profit_pct = (profit / entry) * 100
+                            else:  # SHORT
+                                profit = entry - current_close
+                                profit_pct = (profit / entry) * 100
+                            
+                            sl_distance_pct = (initial_sl_distance / entry) * 100
+                            profit_r = profit_pct / sl_distance_pct if sl_distance_pct > 0 else 0
+                            
+                            # Auto-adjust trailing parameters based on ATR size (timeframe)
+                            # Larger ATR (higher timeframe) needs larger multiplier to avoid premature stops
+                            atr_pct = (atr / current_close) * 100
+                            
+                            # Scale multiplier: if ATR > 1%, increase multiplier (for 1h, 1D timeframes)
+                            # 15m: ATR ~0.1-0.3%, 1h: ATR ~0.3-0.8%, 1D: ATR ~1-3%
+                            if atr_pct > 1.0:  # Large timeframe (1D+)
+                                adjusted_multiplier = trailing_multiplier * 2.0  # Double for large timeframes
+                                adjusted_activation_r = trailing_activation_r * 1.5  # Activate later
+                            elif atr_pct > 0.5:  # Medium timeframe (1h)
+                                adjusted_multiplier = trailing_multiplier * 1.5  # 1.5x for medium timeframes
+                                adjusted_activation_r = trailing_activation_r * 1.2  # Activate slightly later
+                            else:  # Small timeframe (15m, 5m)
+                                adjusted_multiplier = trailing_multiplier  # Use original
+                                adjusted_activation_r = trailing_activation_r  # Use original
+                            
+                            # Check if trailing should activate (with adjusted activation R)
+                            if profit_r >= adjusted_activation_r:
+                                # Calculate trailing distance (with adjusted multiplier)
+                                trailing_distance = atr * adjusted_multiplier
+                                
+                                # Update trailing stop
+                                if current_position == 'LONG':
+                                    new_sl = current_close - trailing_distance
+                                    # Only move SL up, never down
+                                    if new_sl > last_trade['sl']:
+                                        last_trade['sl'] = new_sl
+                                        last_trade['trailing_activated'] = True
+                                else:  # SHORT
+                                    new_sl = current_close + trailing_distance
+                                    # Only move SL down, never up
+                                    if new_sl < last_trade['sl']:
+                                        last_trade['sl'] = new_sl
+                                        last_trade['trailing_activated'] = True
+            
+            # Check SL/TP
+            if current_position and len(trades_list) > 0:
                 last_trade = trades_list[-1]
                 
                 if last_trade.get('exit') is None:
@@ -240,20 +307,63 @@ class BacktestEngine:
                     exit_price = None
                     exit_reason = None
                     
+                    # Check TP - handle partial close if configured
                     if current_position == 'LONG' and current_high >= last_trade['tp']:
-                        exit_price = last_trade['tp']
-                        exit_reason = 'TP'
+                        if enable_partial_tp_close and tp_close_pct < 1.0:
+                            # Close partial position at TP, keep remainder with trailing stop
+                            exit_price = last_trade['tp']
+                            # Calculate partial profit
+                            profit = exit_price - last_trade['entry']
+                            profit_pct = (profit / last_trade['entry']) * 100
+                            initial_capital = 100
+                            risk_amount = initial_capital * (risk_pct / 100)
+                            position_size = risk_amount / (sl_pct / 100)
+                            partial_profit_usd = position_size * (profit_pct / 100) * tp_close_pct
+                            
+                            # Update position size (reduce by tp_close_pct)
+                            # Note: In combo optimizer, we track this by reducing position_size in profit calculation
+                            last_trade['partial_tp_closed'] = True
+                            last_trade['partial_tp_profit'] = round(partial_profit_usd, 4)
+                            
+                            # Remove TP so remaining position can run with trailing stop
+                            last_trade['tp'] = float('inf')
+                            balance += partial_profit_usd
+                        else:
+                            # Close full position at TP (original behavior)
+                            exit_price = last_trade['tp']
+                            exit_reason = 'TP'
                     elif current_position == 'SHORT' and current_low <= last_trade['tp']:
-                        exit_price = last_trade['tp']
-                        exit_reason = 'TP'
+                        if enable_partial_tp_close and tp_close_pct < 1.0:
+                            # Close partial position at TP, keep remainder with trailing stop
+                            exit_price = last_trade['tp']
+                            # Calculate partial profit
+                            profit = last_trade['entry'] - exit_price
+                            profit_pct = (profit / last_trade['entry']) * 100
+                            initial_capital = 100
+                            risk_amount = initial_capital * (risk_pct / 100)
+                            position_size = risk_amount / (sl_pct / 100)
+                            partial_profit_usd = position_size * (profit_pct / 100) * tp_close_pct
+                            
+                            # Update position size (reduce by tp_close_pct)
+                            last_trade['partial_tp_closed'] = True
+                            last_trade['partial_tp_profit'] = round(partial_profit_usd, 4)
+                            
+                            # Remove TP so remaining position can run with trailing stop
+                            last_trade['tp'] = float('-inf')
+                            balance += partial_profit_usd
+                        else:
+                            # Close full position at TP (original behavior)
+                            exit_price = last_trade['tp']
+                            exit_reason = 'TP'
                     
+                    # Check SL (including trailing stop)
                     if not exit_reason:
                         if current_position == 'LONG' and current_low <= last_trade['sl']:
                             exit_price = last_trade['sl']
-                            exit_reason = 'SL'
+                            exit_reason = 'TRAILING_SL' if last_trade.get('trailing_activated') else 'SL'
                         elif current_position == 'SHORT' and current_high >= last_trade['sl']:
                             exit_price = last_trade['sl']
-                            exit_reason = 'SL'
+                            exit_reason = 'TRAILING_SL' if last_trade.get('trailing_activated') else 'SL'
                     
                     if exit_price and exit_reason:
                         profit = exit_price - last_trade['entry'] if current_position == 'LONG' else last_trade['entry'] - exit_price
@@ -263,7 +373,16 @@ class BacktestEngine:
                         initial_capital = 100
                         risk_amount = initial_capital * (risk_pct / 100)
                         position_size = risk_amount / (sl_pct / 100)
-                        actual_profit_usd = position_size * (profit_pct / 100)
+                        
+                        # If partial TP was closed, calculate profit for remaining position
+                        if last_trade.get('partial_tp_closed'):
+                            # Remaining position size after partial TP
+                            remaining_position_size = position_size * (1 - tp_close_pct)
+                            actual_profit_usd = remaining_position_size * (profit_pct / 100)
+                            # Add partial TP profit
+                            actual_profit_usd += last_trade.get('partial_tp_profit', 0)
+                        else:
+                            actual_profit_usd = position_size * (profit_pct / 100)
                         
                         last_trade['exit'] = round(exit_price, 2)
                         last_trade['exit_time'] = ohlcv_data[i].get('time', '')

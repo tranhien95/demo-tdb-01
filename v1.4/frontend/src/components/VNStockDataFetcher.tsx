@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react'
-import { binanceAPI } from '../services/api'
+import { vnstockAPI } from '../services/api'
 import { useOptimizerStore } from '../store/optimizerStore'
 import { OHLCV } from '../types'
 
-export const BinanceDataFetcher: React.FC = () => {
+export const VNStockDataFetcher: React.FC = () => {
   const { setCsvData, setProgress } = useOptimizerStore()
   
   const [symbols, setSymbols] = useState<string[]>([])
   const [timeframes, setTimeframes] = useState<Record<string, string>>({})
   
-  const [selectedSymbol, setSelectedSymbol] = useState('BTC/USDT')
-  const [selectedTimeframe, setSelectedTimeframe] = useState('15m')
-  const [limit, setLimit] = useState(2000)
+  const [assetType, setAssetType] = useState<'stock' | 'derivative'>('stock')
+  const [selectedSymbol, setSelectedSymbol] = useState('VCB')
+  const [selectedTimeframe, setSelectedTimeframe] = useState('1d')
+  const [limit, setLimit] = useState(1000)
   const [useDateRange, setUseDateRange] = useState(false)
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
@@ -19,6 +20,7 @@ export const BinanceDataFetcher: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [warning, setWarning] = useState('')
 
   // Helper function to format date for datetime-local input
   const formatDateForInput = (date: Date): string => {
@@ -30,13 +32,13 @@ export const BinanceDataFetcher: React.FC = () => {
     return `${year}-${month}-${day}T${hours}:${minutes}`
   }
 
-  // Initialize default dates: 1 month ago to now
+  // Initialize default dates: 1 year ago to now (for stocks)
   const getDefaultDates = () => {
     const now = new Date()
-    const oneMonthAgo = new Date(now)
-    oneMonthAgo.setMonth(now.getMonth() - 1)
+    const oneYearAgo = new Date(now)
+    oneYearAgo.setFullYear(now.getFullYear() - 1)
     return {
-      start: formatDateForInput(oneMonthAgo),
+      start: formatDateForInput(oneYearAgo),
       end: formatDateForInput(now)
     }
   }
@@ -46,7 +48,26 @@ export const BinanceDataFetcher: React.FC = () => {
     loadAvailableOptions()
   }, [])
 
-  // Set default dates (1 month ago to now) when useDateRange is enabled
+  // Fallback symbols if API fails
+  const fallbackStocks = ['VCB', 'VIC', 'VHM', 'VRE', 'VNM', 'HPG', 'MSN', 'TCB', 'BID', 'CTG', 'VPB', 'SSI', 'FPT', 'VJC', 'MWG', 'PNJ', 'GAS', 'PLX', 'POW', 'GVR']
+  const fallbackDerivatives = ['VN30F1M', 'VN30F2M', 'VN30F3M', 'HNX30F1M', 'HNX30F2M', 'HNX30F3M']
+  
+  // Load symbols when asset type changes
+  useEffect(() => {
+    loadAvailableOptions()
+  }, [assetType])
+  const fallbackTimeframes: Record<string, string> = {
+    '1': '1 phút',
+    '5': '5 phút',
+    '15': '15 phút',
+    '30': '30 phút',
+    '1h': '1 giờ',
+    '1d': '1 ngày',
+    '1w': '1 tuần',
+    '1M': '1 tháng'
+  }
+
+  // Set default dates (1 year ago to now) when useDateRange is enabled
   useEffect(() => {
     if (useDateRange) {
       const defaults = getDefaultDates()
@@ -57,20 +78,56 @@ export const BinanceDataFetcher: React.FC = () => {
 
   const loadAvailableOptions = async () => {
     try {
+      setError('')
+      setWarning('')
+      
       const [symbolsRes, timeframesRes] = await Promise.all([
-        binanceAPI.getSymbols(),
-        binanceAPI.getTimeframes()
+        vnstockAPI.getSymbols(assetType),
+        vnstockAPI.getTimeframes()
       ])
-      setSymbols(symbolsRes.symbols)
-      setTimeframes(timeframesRes.timeframes)
-    } catch (err) {
-      setError('Không thể tải danh sách symbol/timeframe: ' + (err as Error).message)
+      
+      // Handle warning status (vnstock not installed, API error, outside trading hours, etc.)
+      if (symbolsRes.status === 'warning' || timeframesRes.status === 'warning') {
+        const warningMsg = symbolsRes.message || timeframesRes.message || 'vnstock API tạm thời không khả dụng'
+        setWarning(warningMsg)
+        // Don't set error, just show warning
+      } else if (symbolsRes.status === 'success' || !symbolsRes.status) {
+        // Success - clear warnings
+        setWarning('')
+      }
+      
+      const fallbackSymbols = assetType === 'derivative' ? fallbackDerivatives : fallbackStocks
+      setSymbols(symbolsRes.symbols || fallbackSymbols)
+      setTimeframes(timeframesRes.timeframes || fallbackTimeframes)
+      
+      // Reset selected symbol when asset type changes
+      if (symbolsRes.symbols && symbolsRes.symbols.length > 0) {
+        setSelectedSymbol(symbolsRes.symbols[0])
+      }
+    } catch (err: any) {
+      const errorMsg = err.message || String(err)
+      // Use fallback data on errors
+      const fallbackSymbols = assetType === 'derivative' ? fallbackDerivatives : fallbackStocks
+      setSymbols(fallbackSymbols)
+      setTimeframes(fallbackTimeframes)
+      
+      if (fallbackSymbols.length > 0) {
+        setSelectedSymbol(fallbackSymbols[0])
+      }
+      
+      // Check if it's a network error or server error
+      if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError')) {
+        setWarning('⚠️ Không thể kết nối đến server. Đang dùng danh sách mã mặc định. Vui lòng kiểm tra backend server.')
+      } else {
+        setWarning('⚠️ ' + errorMsg + '. Đang dùng danh sách mã mặc định.')
+      }
     }
   }
 
   const handleFetchData = async () => {
     setError('')
     setSuccess('')
+    setWarning('')
     setLoading(true)
 
     try {
@@ -87,7 +144,6 @@ export const BinanceDataFetcher: React.FC = () => {
         }
         
         // Convert datetime-local format (YYYY-MM-DDTHH:mm) to backend format (YYYY-MM-DD HH:MM:SS)
-        // datetime-local returns format like "2024-01-01T12:00"
         formattedStartDate = startDate.replace('T', ' ')
         if (formattedStartDate.split(':').length === 2) {
           formattedStartDate += ':00' // Add seconds if missing
@@ -102,11 +158,15 @@ export const BinanceDataFetcher: React.FC = () => {
       setProgress({ isRunning: true, percent: 10, tested: 0, withTrades: 0 })
 
       const response = useDateRange
-        ? await binanceAPI.fetchData(selectedSymbol, selectedTimeframe, undefined, formattedStartDate, formattedEndDate)
-        : await binanceAPI.fetchData(selectedSymbol, selectedTimeframe, limit)
+        ? await vnstockAPI.fetchData(selectedSymbol, selectedTimeframe, undefined, formattedStartDate, formattedEndDate)
+        : await vnstockAPI.fetchData(selectedSymbol, selectedTimeframe, limit)
 
       if (response.status !== 'success') {
-        throw new Error(response.message || 'Fetch failed')
+        const errorMsg = response.message || response.detail || 'Fetch failed'
+        if (errorMsg.includes('vnstock') || errorMsg.includes('503') || errorMsg.includes('Service Unavailable')) {
+          throw new Error('⚠️ vnstock library chưa được cài đặt hoặc API không khả dụng.\n\nVui lòng:\n1. Chạy: pip install vnstock trong thư mục backend\n2. Restart backend server\n3. Refresh browser và thử lại\n\nHoặc có thể do:\n- Không trong giờ giao dịch (9:00-15:00 giờ VN)\n- Lỗi mạng hoặc API tạm thời không khả dụng')
+        }
+        throw new Error(errorMsg)
       }
 
       // Convert to OHLCV format
@@ -136,13 +196,46 @@ export const BinanceDataFetcher: React.FC = () => {
 
   return (
     <div className="p-6 bg-white rounded-lg shadow-md border border-gray-200">
-      <h2 className="text-2xl font-bold mb-4 text-gray-800">📊 Lấy Data từ Binance</h2>
+      <h2 className="text-2xl font-bold mb-4 text-gray-800">🇻🇳 Lấy Data từ Chứng Khoán Việt Nam</h2>
+
+      {/* Asset Type Selection */}
+      <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Loại Tài Sản
+        </label>
+        <div className="flex gap-4">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="assetType"
+              value="stock"
+              checked={assetType === 'stock'}
+              onChange={(e) => setAssetType(e.target.value as 'stock' | 'derivative')}
+              disabled={loading}
+              className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+            />
+            <span className="text-sm font-medium text-gray-700">📈 Cổ Phiếu</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="assetType"
+              value="derivative"
+              checked={assetType === 'derivative'}
+              onChange={(e) => setAssetType(e.target.value as 'stock' | 'derivative')}
+              disabled={loading}
+              className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+            />
+            <span className="text-sm font-medium text-gray-700">📊 Phái Sinh (Futures)</span>
+          </label>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
         {/* Symbol Selection */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Symbol
+            {assetType === 'derivative' ? 'Mã Phái Sinh' : 'Mã Cổ Phiếu'}
           </label>
           <select
             value={selectedSymbol}
@@ -243,34 +336,63 @@ export const BinanceDataFetcher: React.FC = () => {
         <button
           onClick={handleFetchData}
           disabled={loading || !selectedSymbol || !selectedTimeframe || (useDateRange && (!startDate || !endDate))}
-          className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition shadow-md hover:shadow-lg"
+          className="w-full px-6 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition shadow-md hover:shadow-lg"
         >
-          {loading ? '⏳ Đang tải...' : '📥 Tải Data từ Binance'}
+          {loading ? '⏳ Đang tải...' : '📥 Tải Data từ Chứng Khoán VN'}
         </button>
       </div>
 
       {/* Status Messages */}
+      {warning && (
+        <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800">
+          <div className="flex items-start gap-2">
+            <span className="text-xl">⚠️</span>
+            <div className="flex-1">
+              <p className="font-semibold mb-1">Cảnh báo:</p>
+              <p className="whitespace-pre-line text-sm">{warning}</p>
+            </div>
+          </div>
+        </div>
+      )}
       {error && (
         <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
-          {error}
+          <div className="flex items-start gap-2">
+            <span className="text-xl">❌</span>
+            <div className="flex-1">
+              <p className="font-semibold mb-1">Lỗi:</p>
+              <p className="whitespace-pre-line text-sm">{error}</p>
+            </div>
+          </div>
         </div>
       )}
       {success && (
         <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg text-green-700">
-          {success}
+          <div className="flex items-start gap-2">
+            <span className="text-xl">✅</span>
+            <div className="flex-1">
+              <p className="font-semibold mb-1">Thành công:</p>
+              <p className="text-sm">{success}</p>
+            </div>
+          </div>
         </div>
       )}
 
       {/* Info */}
-      <div className="text-sm text-gray-600 bg-blue-50 p-4 rounded-lg border border-blue-100">
-        <p>💡 <strong>Tip:</strong> Chọn symbol, timeframe, và:</p>
+      <div className="text-sm text-gray-600 bg-green-50 p-4 rounded-lg border border-green-100">
+        <p>💡 <strong>Tip:</strong> Chọn mã cổ phiếu, timeframe, và:</p>
         <ul className="list-disc list-inside mt-1 ml-2">
           <li>Số lượng candles (50-10000), hoặc</li>
           <li>Khoảng thời gian (từ ngày đến ngày)</li>
         </ul>
-        <p className="mt-2">🔗 <strong>Symbols:</strong> BTC, ETH, BNB, XRP, SOL, ADA, DOGE, v.v...</p>
-        <p>⏱️ <strong>Timeframes:</strong> 1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w</p>
+        <p className="mt-2">🔗 <strong>Mã cổ phiếu phổ biến:</strong> VCB, VIC, VHM, HPG, MSN, TCB, BID, CTG, VPB, SSI, FPT, VJC, v.v...</p>
+        <p>⏱️ <strong>Timeframes:</strong> 1 phút, 5 phút, 15 phút, 30 phút, 1 giờ, 1 ngày, 1 tuần, 1 tháng</p>
         <p className="mt-2">📅 <strong>Date Range:</strong> Chọn checkbox để tải data theo khoảng thời gian cụ thể</p>
+        <p className="mt-2 text-orange-600">⚠️ <strong>Lưu ý:</strong></p>
+        <ul className="list-disc list-inside mt-1 ml-2 text-orange-600">
+          <li>Cần cài đặt vnstock library: <code className="bg-gray-200 px-1 rounded">pip install vnstock</code></li>
+          <li>Giờ giao dịch VN: 9:00 - 15:00 (giờ VN). Ngoài giờ giao dịch, API có thể không trả về data.</li>
+          <li>Nếu gặp lỗi, hệ thống sẽ tự động dùng danh sách mã mặc định để UI vẫn hoạt động.</li>
+        </ul>
       </div>
     </div>
   )

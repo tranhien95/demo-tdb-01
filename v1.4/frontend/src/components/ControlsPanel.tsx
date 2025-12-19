@@ -203,6 +203,92 @@ export const ControlsPanel: React.FC = () => {
           </div>
         </div>
       </div>
+
+      <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border-l-4 border-blue-500">
+        <h3 className="text-lg font-bold text-secondary mb-3">🎯 Advanced Exit Settings</h3>
+        
+        {/* Trailing Stop */}
+        <div className="mb-4">
+          <div className="flex items-center space-x-3 mb-2">
+            <input
+              type="checkbox"
+              className="w-5 h-5"
+              checked={params.enableTrailingStop}
+              onChange={(e) => handleChange('enableTrailingStop', e.target.checked)}
+            />
+            <label className="text-gray-300 font-medium">Enable Trailing Stop</label>
+          </div>
+          {params.enableTrailingStop && (
+            <div className="ml-8 space-y-3">
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Activation R: {params.trailingActivationR}
+                </label>
+                <input
+                  type="range"
+                  min="0.5"
+                  max="3.0"
+                  step="0.1"
+                  value={params.trailingActivationR}
+                  onChange={(e) => handleChange('trailingActivationR', parseFloat(e.target.value))}
+                  className="w-full"
+                />
+                <p className="text-xs text-gray-400">Activate trailing when profit &gt;= this R value</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Trailing Multiplier: {params.trailingMultiplier}x ATR
+                </label>
+                <input
+                  type="range"
+                  min="0.5"
+                  max="5.0"
+                  step="0.1"
+                  value={params.trailingMultiplier}
+                  onChange={(e) => handleChange('trailingMultiplier', parseFloat(e.target.value))}
+                  className="w-full"
+                />
+                <p className="text-xs text-gray-400">Trailing distance = ATR × multiplier</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Partial TP Close */}
+        <div>
+          <div className="flex items-center space-x-3 mb-2">
+            <input
+              type="checkbox"
+              className="w-5 h-5"
+              checked={params.enablePartialTPClose}
+              onChange={(e) => handleChange('enablePartialTPClose', e.target.checked)}
+            />
+            <label className="text-gray-300 font-medium">Enable Partial TP Close</label>
+          </div>
+          <p className="text-xs text-gray-400 ml-8 mb-2">
+            Close % of position at TP, keep remainder with trailing stop
+          </p>
+          {params.enablePartialTPClose && (
+            <div className="ml-8">
+              <label className="block text-sm font-medium mb-1">
+                Close % at TP: {(params.tpClosePct * 100).toFixed(0)}%
+              </label>
+              <input
+                type="range"
+                min="0.1"
+                max="1.0"
+                step="0.1"
+                value={params.tpClosePct}
+                onChange={(e) => handleChange('tpClosePct', parseFloat(e.target.value))}
+                className="w-full"
+              />
+              <p className="text-xs text-gray-400">
+                {(params.tpClosePct * 100).toFixed(0)}% closed at TP, {((1 - params.tpClosePct) * 100).toFixed(0)}% kept with trailing stop
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

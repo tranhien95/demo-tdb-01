@@ -18,7 +18,14 @@ export const StrategyBuilder: React.FC = () => {
     name: 'My Strategy',
     description: '',
     indicators: [],
-    signal_logic: { threshold_percent: 60 },
+    signal_logic: { 
+      threshold_percent: 60,
+      enable_partial_tp_close: false,
+      tp_close_pct: 0.5,
+      enable_trailing_stop: true,
+      trailing_activation_r: 1.0,
+      trailing_multiplier: 1.5
+    },
     filters: {
       enable_adx: false,
       adx_threshold: 25,
@@ -434,6 +441,123 @@ export const StrategyBuilder: React.FC = () => {
             <p className="text-xs text-gray-600 mt-1">
               Tín hiệu chỉ kích hoạt khi bullish hoặc bearish percent &gt;= threshold
             </p>
+          </div>
+
+          {/* Trailing Stop & Partial TP Settings */}
+          <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+            <h4 className="text-sm font-bold mb-3">🎯 Advanced Exit Settings</h4>
+            
+            {/* Trailing Stop */}
+            <div className="mb-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={strategy.signal_logic.enable_trailing_stop ?? true}
+                  onChange={(e) => setStrategy(prev => ({
+                    ...prev,
+                    signal_logic: {
+                      ...prev.signal_logic,
+                      enable_trailing_stop: e.target.checked
+                    }
+                  }))}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm font-medium">Enable Trailing Stop</span>
+              </label>
+              {strategy.signal_logic.enable_trailing_stop && (
+                <div className="ml-6 mt-2 space-y-2">
+                  <div>
+                    <label className="block text-xs mb-1">
+                      Activation R: {strategy.signal_logic.trailing_activation_r ?? 1.0}
+                    </label>
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="3.0"
+                      step="0.1"
+                      value={strategy.signal_logic.trailing_activation_r ?? 1.0}
+                      onChange={(e) => setStrategy(prev => ({
+                        ...prev,
+                        signal_logic: {
+                          ...prev.signal_logic,
+                          trailing_activation_r: parseFloat(e.target.value)
+                        }
+                      }))}
+                      className="w-full"
+                    />
+                    <p className="text-xs text-gray-600">Activate trailing when profit &gt;= this R value</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs mb-1">
+                      Trailing Multiplier: {strategy.signal_logic.trailing_multiplier ?? 1.5}x ATR
+                    </label>
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="5.0"
+                      step="0.1"
+                      value={strategy.signal_logic.trailing_multiplier ?? 1.5}
+                      onChange={(e) => setStrategy(prev => ({
+                        ...prev,
+                        signal_logic: {
+                          ...prev.signal_logic,
+                          trailing_multiplier: parseFloat(e.target.value)
+                        }
+                      }))}
+                      className="w-full"
+                    />
+                    <p className="text-xs text-gray-600">Trailing distance = ATR × multiplier</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Partial TP Close */}
+            <div className="mb-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={strategy.signal_logic.enable_partial_tp_close ?? false}
+                  onChange={(e) => setStrategy(prev => ({
+                    ...prev,
+                    signal_logic: {
+                      ...prev.signal_logic,
+                      enable_partial_tp_close: e.target.checked
+                    }
+                  }))}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm font-medium">Enable Partial TP Close</span>
+              </label>
+              <p className="text-xs text-gray-600 ml-6 mt-1">
+                Close % of position at TP, keep remainder with trailing stop
+              </p>
+              {strategy.signal_logic.enable_partial_tp_close && (
+                <div className="ml-6 mt-2">
+                  <label className="block text-xs mb-1">
+                    Close % at TP: {(strategy.signal_logic.tp_close_pct ?? 0.5) * 100}%
+                  </label>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1.0"
+                    step="0.1"
+                    value={strategy.signal_logic.tp_close_pct ?? 0.5}
+                    onChange={(e) => setStrategy(prev => ({
+                      ...prev,
+                      signal_logic: {
+                        ...prev.signal_logic,
+                        tp_close_pct: parseFloat(e.target.value)
+                      }
+                    }))}
+                    className="w-full"
+                  />
+                  <p className="text-xs text-gray-600">
+                    {(strategy.signal_logic.tp_close_pct ?? 0.5) * 100}% closed at TP, {((1 - (strategy.signal_logic.tp_close_pct ?? 0.5)) * 100).toFixed(0)}% kept with trailing stop
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

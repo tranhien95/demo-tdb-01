@@ -11,6 +11,7 @@ from live_trading_models import (
     SignalType, TradeStatus, SignalWithConfidence, CandleData
 )
 from strategy_engine import StrategyEngine
+from strategy_models import Strategy
 # Use database storage instead of JSON
 from strategy_storage_db import strategy_storage
 from binance_fetcher import get_binance_fetcher
@@ -29,25 +30,35 @@ class LiveTradingEngine:
         self.state: Optional[LiveTradingState] = None
         self.price_history: Dict[str, List[CandleData]] = {}
         self.binance_fetcher = get_binance_fetcher()
+        self._current_strategy: Optional[Strategy] = None  # Store strategy if provided directly
     
     # ===================== INIT & CONFIG =====================
     
-    def initialize(self, config: TradingConfig) -> bool:
+    def initialize(self, config: TradingConfig, strategy: Optional[Strategy] = None) -> bool:
         """
         Initialize live trading session
         
         Args:
             config: Trading configuration
+            strategy: Optional Strategy object (if provided, will use this instead of loading from storage)
             
         Returns:
             True if successful
         """
         try:
-            # Load strategy
-            strategy = strategy_storage.load_strategy(config.strategy_name)
-            if not strategy:
-                print(f"Strategy '{config.strategy_name}' not found")
-                return False
+            # Use provided strategy or load from storage
+            if strategy is None:
+                strategy = strategy_storage.load_strategy(config.strategy_name)
+                if not strategy:
+                    print(f"Strategy '{config.strategy_name}' not found")
+                    return False
+                self._current_strategy = None  # Will load from storage in update()
+            else:
+                # Store strategy reference for later use
+                self._current_strategy = strategy
+                # Update strategy name in config for consistency
+                if not config.strategy_name or config.strategy_name == "":
+                    config.strategy_name = strategy.name
             
             # Create initial state
             self.state = LiveTradingState(
@@ -197,10 +208,15 @@ class LiveTradingEngine:
             # Get current price
             current_price = candles[-1].close
             
-            # Load strategy
-            strategy = strategy_storage.load_strategy(
-                self.state.config.strategy_name
-            )
+            # Use stored strategy or load from storage
+            if self._current_strategy:
+                strategy = self._current_strategy
+            else:
+                strategy = strategy_storage.load_strategy(
+                    self.state.config.strategy_name
+                )
+                if not strategy:
+                    return {"error": f"Strategy '{self.state.config.strategy_name}' not found"}
             
             # Calculate signals
             signals = self._get_signals(strategy, candles)
@@ -266,15 +282,18 @@ class LiveTradingEngine:
                 else:
                     signal_type = SignalType.BUY
                 confidence = bullish_pct
+                print(f"[Signal] BULLISH: {bullish_pct:.1f}% bullish, {bearish_pct:.1f}% bearish -> {signal_type}")
             elif direction == "BEARISH":
                 if bearish_pct >= 80:
                     signal_type = SignalType.STRONG_SELL
                 else:
                     signal_type = SignalType.SELL
                 confidence = bearish_pct
+                print(f"[Signal] BEARISH: {bullish_pct:.1f}% bullish, {bearish_pct:.1f}% bearish -> {signal_type}")
             else:
                 signal_type = SignalType.NEUTRAL
                 confidence = 50.0
+                print(f"[Signal] NEUTRAL: {bullish_pct:.1f}% bullish, {bearish_pct:.1f}% bearish (no direction)")
             
             # Get reversal signals (check for divergence in signals_detail)
             reversal_strength = 0.0
@@ -339,21 +358,53 @@ class LiveTradingEngine:
                 if current_price <= position.stoploss:
                     exit_reason = "SL_HIT" if not position.trailing_activated else "TRAILING_SL_HIT"
                 elif current_price >= position.takeprofit:
-                    exit_reason = "TP_HIT"
+                    # When TP hit, only close partial position if configured
+                    tp_close_pct = self.state.config.tp_close_pct
+                    if tp_close_pct < 1.0:
+                        # Close partial position at TP, keep remainder with trailing stop
+                        self._close_partial_position(position, tp_close_pct, f"TP Hit - Close {tp_close_pct*100:.0f}%")
+                        # Remove TP so remaining position can run with trailing stop
+                        position.takeprofit = float('inf') if position.side == "LONG" else float('-inf')
+                        print(f"[TP] Closed {tp_close_pct*100:.0f}% @ TP, keeping {100-tp_close_pct*100:.0f}% with trailing stop")
+                    else:
+                        # Close full position at TP (original behavior)
+                        exit_reason = "TP_HIT"
             else:  # SHORT
                 if current_price >= position.stoploss:
                     exit_reason = "SL_HIT" if not position.trailing_activated else "TRAILING_SL_HIT"
                 elif current_price <= position.takeprofit:
-                    exit_reason = "TP_HIT"
+                    # When TP hit, only close partial position if configured
+                    tp_close_pct = self.state.config.tp_close_pct
+                    if tp_close_pct < 1.0:
+                        # Close partial position at TP, keep remainder with trailing stop
+                        self._close_partial_position(position, tp_close_pct, f"TP Hit - Close {tp_close_pct*100:.0f}%")
+                        # Remove TP so remaining position can run with trailing stop
+                        position.takeprofit = float('-inf') if position.side == "SHORT" else float('inf')
+                        print(f"[TP] Closed {tp_close_pct*100:.0f}% @ TP, keeping {100-tp_close_pct*100:.0f}% with trailing stop")
+                    else:
+                        # Close full position at TP (original behavior)
+                        exit_reason = "TP_HIT"
             
-            # Check reversal signal
+            # Check reversal signal (only close if losing to protect capital)
             if not exit_reason:
-                if position.side == "LONG" and signals.type in [SignalType.STRONG_SELL, SignalType.SELL]:
-                    if signals.reversal_strength >= self.state.config.reversal_strength_threshold:
-                        exit_reason = "REVERSAL_SIGNAL"
-                elif position.side == "SHORT" and signals.type in [SignalType.STRONG_BUY, SignalType.BUY]:
-                    if signals.reversal_strength >= self.state.config.reversal_strength_threshold:
-                        exit_reason = "REVERSAL_SIGNAL"
+                # Calculate current profit in R
+                initial_sl_distance = abs(position.entry_price - position.initial_stoploss)
+                if initial_sl_distance > 0:
+                    profit_r = position.current_pnl_percent / (initial_sl_distance / position.entry_price * 100)
+                else:
+                    profit_r = 0
+                
+                # Only close on reversal if position is losing (protect capital)
+                # If profitable, let trailing stop or TP handle the exit
+                should_close_on_reversal = profit_r < 0
+                
+                if should_close_on_reversal:
+                    if position.side == "LONG" and signals.type in [SignalType.STRONG_SELL, SignalType.SELL]:
+                        if signals.reversal_strength >= self.state.config.reversal_strength_threshold:
+                            exit_reason = "REVERSAL_SIGNAL"
+                    elif position.side == "SHORT" and signals.type in [SignalType.STRONG_BUY, SignalType.BUY]:
+                        if signals.reversal_strength >= self.state.config.reversal_strength_threshold:
+                            exit_reason = "REVERSAL_SIGNAL"
             
             if exit_reason:
                 positions_to_close.append((position, exit_reason, current_price, signals.type))
@@ -364,6 +415,14 @@ class LiveTradingEngine:
     
     def _check_entry_conditions(self, current_price: float, signals: SignalWithConfidence):
         """Check if should open new position với filters"""
+        # Log signal info for debugging
+        print(f"[Entry Check] Signal: {signals.type}, Confidence: {signals.confidence:.1f}%, Reversal: {signals.reversal_strength:.1f}%")
+        
+        # Check if we have a valid signal
+        if signals.type == SignalType.NEUTRAL:
+            print(f"[Entry Check] No signal (NEUTRAL) - Skip")
+            return
+        
         # 1. Signal Quality Scoring (if enabled)
         if self.state.config.enable_signal_quality:
             symbol = self.state.config.symbol
@@ -426,12 +485,17 @@ class LiveTradingEngine:
                 return
         
         # 5. Original entry logic
-        min_confidence = 65.0
+        min_confidence = 50.0  # Lower threshold to allow more entries
         
-        if signals.type == SignalType.STRONG_BUY and signals.confidence >= min_confidence:
+        # Allow both STRONG and regular BUY/SELL signals
+        if signals.type in [SignalType.STRONG_BUY, SignalType.BUY] and signals.confidence >= min_confidence:
+            print(f"[Entry Check] ✓ LONG signal passed all filters. Opening position...")
             self._open_position(current_price, "LONG", signals)
-        elif signals.type == SignalType.STRONG_SELL and signals.confidence >= min_confidence:
+        elif signals.type in [SignalType.STRONG_SELL, SignalType.SELL] and signals.confidence >= min_confidence:
+            print(f"[Entry Check] ✓ SHORT signal passed all filters. Opening position...")
             self._open_position(current_price, "SHORT", signals)
+        else:
+            print(f"[Entry Check] Signal confidence {signals.confidence:.1f}% < {min_confidence}% or signal type {signals.type} not valid - Skip")
     
     def _open_position(self, entry_price: float, side: str, signals: SignalWithConfidence) -> Optional[Position]:
         """Open new position với dynamic position sizing"""

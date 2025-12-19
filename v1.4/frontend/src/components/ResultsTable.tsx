@@ -41,7 +41,29 @@ export const ResultsTable: React.FC = () => {
   const handleGenerateScript = async (combo: ComboResult) => {
     const indicators = combo.combo.split(' + ')
     try {
-      const result = await optimizerAPI.generatePineScript(indicators)
+      // Get filter settings from params
+      const filterSettings = {
+        indicators: indicators,
+        filters: {
+          enable_adx: params.enableADXFilter,
+          adx_threshold: params.adxThreshold,
+          enable_volume: params.enableVolumeFilter,
+          volume_threshold: params.volumeThreshold >= 1 ? params.volumeThreshold / 100 : params.volumeThreshold, // Handle both % and multiplier
+          enable_ma_filter: params.enableMAFilter,
+          ma_period: params.maValue,
+          enable_atr_filter: params.enableVolatilityFilter,
+          min_atr: params.minATR,
+          enable_trend_filter: params.enableTrendFilter,
+          trend_ma: params.trendMA,
+          threshold: params.threshold,
+          candle_confirmation: params.candleConfirmation,
+          risk_percent: params.riskPercent,
+          rr_ratio: params.rrRatio,
+          sl_percent: params.slPercent,
+          capital: params.capital
+        }
+      }
+      const result = await optimizerAPI.generatePineScript(indicators, filterSettings)
       
       // Download as file
       const blob = new Blob([result.code], { type: 'text/plain' })
@@ -54,6 +76,156 @@ export const ResultsTable: React.FC = () => {
     } catch (error) {
       alert('Failed to generate Pine Script: ' + (error as Error).message)
     }
+  }
+
+  const downloadComboTrades = (combo: ComboResult) => {
+    if (!combo.trades_list || combo.trades_list.length === 0) {
+      alert('Không có trades để tải về cho combo này')
+      return
+    }
+
+    const formatDateTime = (timeStr: string) => {
+      if (!timeStr) return ''
+      try {
+        const date = new Date(timeStr)
+        return date.toISOString().slice(0, 16).replace('T', ' ')
+      } catch {
+        return timeStr
+      }
+    }
+
+    const formatCurrency = (value: number) => {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(value)
+    }
+
+    // TradingView format
+    const headers = [
+      'Giao dịch #',
+      'Loại',
+      'Ngày/Giờ',
+      'Tín hiệu',
+      'Giá USDT',
+      'Quy mô vị thế (số lượng)',
+      'Quy mô vị thế (giá trị)',
+      'P&L ròng USD',
+      'P&L ròng %',
+      'Tăng lên USD',
+      'Tăng lên %',
+      'Mức sụt giảm tài khoản lớn nhất USD',
+      'Mức sụt giảm tài khoản lớn nhất %',
+      'P&L lũy kế USD',
+      'P&L lũy kế %'
+    ]
+
+    const initialCapital = combo.trades_list.length > 0 && combo.trades_list[0].balance_before 
+      ? combo.trades_list[0].balance_before 
+      : params.capital || 1000
+
+    let cumulativeProfit = 0
+    let maxDrawdown = 0
+    let maxDrawdownPct = 0
+    let peakBalance = initialCapital
+    let runningBalance = initialCapital
+
+    const rows: any[] = []
+    
+    combo.trades_list.forEach((trade, index) => {
+      const tradeNumber = index + 1
+      const profitUsd = trade.profit || 0
+      const profitPct = trade.profit_pct || 0
+      
+      // Calculate position size if not present (backward compatibility)
+      let positionSize = trade.position_size || 0
+      if (!positionSize && profitPct !== 0) {
+        // Estimate from profit: positionSize = profitUSD / (profitPct / 100)
+        positionSize = Math.abs(profitUsd / (profitPct / 100))
+      } else if (!positionSize) {
+        // Default calculation: risk = initialCapital * risk%, position = risk / SL%
+        // Assuming 5% SL and 10% risk
+        const estimatedRisk = initialCapital * 0.1
+        positionSize = estimatedRisk / 0.05
+      }
+      
+      const positionQuantity = positionSize / (trade.entry || 1)
+      
+      cumulativeProfit += profitUsd
+      runningBalance = initialCapital + cumulativeProfit
+      
+      if (runningBalance > peakBalance) {
+        peakBalance = runningBalance
+      }
+      const drawdown = peakBalance - runningBalance
+      const drawdownPct = peakBalance > 0 ? (drawdown / peakBalance) * 100 : 0
+      if (drawdown > maxDrawdown) {
+        maxDrawdown = drawdown
+      }
+      if (drawdownPct > maxDrawdownPct) {
+        maxDrawdownPct = drawdownPct
+      }
+
+      const entrySignal = trade.type === 'LONG' ? 'Long' : 'Short'
+      const exitSignal = trade.exit_reason === 'TP' ? `${trade.type === 'LONG' ? 'Long' : 'Short'} Exit` :
+                        trade.exit_reason === 'SL' ? `${trade.type === 'LONG' ? 'Long' : 'Short'} Exit` :
+                        `Close entry(s) order ${trade.type === 'LONG' ? 'Long' : 'Short'}`
+
+      // Entry row
+      rows.push([
+        tradeNumber,
+        `Vào Lệnh ${trade.type === 'LONG' ? 'mua' : 'bán'}`,
+        formatDateTime(trade.time),
+        entrySignal,
+        trade.entry.toFixed(2),
+        positionQuantity.toFixed(5),
+        positionSize.toFixed(8),
+        profitUsd.toFixed(2),
+        profitPct.toFixed(2),
+        profitUsd >= 0 ? profitUsd.toFixed(2) : '0.00',
+        profitPct >= 0 ? profitPct.toFixed(2) : '0.00',
+        maxDrawdown.toFixed(2),
+        maxDrawdownPct.toFixed(2),
+        cumulativeProfit.toFixed(2),
+        initialCapital > 0 ? ((cumulativeProfit / initialCapital) * 100).toFixed(2) : '0.00'
+      ])
+
+      // Exit row (only if trade is closed)
+      if (trade.exit && trade.exit_time) {
+        rows.push([
+          tradeNumber,
+          `Thoát Lệnh ${trade.type === 'LONG' ? 'mua' : 'bán'}`,
+          formatDateTime(trade.exit_time),
+          exitSignal,
+          trade.exit.toFixed(2),
+          positionQuantity.toFixed(5),
+          positionSize.toFixed(8),
+          profitUsd.toFixed(2),
+          profitPct.toFixed(2),
+          profitUsd >= 0 ? profitUsd.toFixed(2) : '0.00',
+          profitPct >= 0 ? profitPct.toFixed(2) : '0.00',
+          maxDrawdown.toFixed(2),
+          maxDrawdownPct.toFixed(2),
+          cumulativeProfit.toFixed(2),
+          initialCapital > 0 ? ((cumulativeProfit / initialCapital) * 100).toFixed(2) : '0.00'
+        ])
+      }
+    })
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map((cell: any) => `"${cell}"`).join(','))
+    ].join('\n')
+
+    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `trades-${combo.combo.replace(/ \+ /g, '_')}-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   const downloadCSV = () => {
@@ -137,7 +309,7 @@ export const ResultsTable: React.FC = () => {
                   <td className="p-4 text-center">{result.draw_down}%</td>
                   <td className="p-4 text-center">{result.sharpe}</td>
                   <td className="p-4 text-center">
-                    <div className="flex gap-2 justify-center">
+                    <div className="flex gap-2 justify-center flex-wrap">
                       <button
                         className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm font-bold"
                         onClick={(e) => {
@@ -157,6 +329,16 @@ export const ResultsTable: React.FC = () => {
                         title="Generate Pine Script"
                       >
                         📝 Script
+                      </button>
+                      <button
+                        className="bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded text-sm font-bold"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          downloadComboTrades(result)
+                        }}
+                        title="Tải danh sách trades"
+                      >
+                        📊 Trades
                       </button>
                     </div>
                   </td>

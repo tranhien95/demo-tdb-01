@@ -12,7 +12,7 @@ export const StrategyChart: React.FC<Props> = ({ ohlcvData, result }) => {
   const chartRef = useRef<IChartApi | null>(null)
 
   useEffect(() => {
-    if (!chartContainerRef.current || !ohlcvData.length) return
+    if (!chartContainerRef.current || !ohlcvData || !ohlcvData.length) return
 
     const chart = createChart(chartContainerRef.current, {
       layout: {
@@ -84,8 +84,8 @@ export const StrategyChart: React.FC<Props> = ({ ohlcvData, result }) => {
 
     candlestickSeries.setData(uniqueCandleData)
 
-    // Add entry markers
-    const entryMarkers = result.trades.map((trade) => {
+    // Add entry markers (only if result and trades exist)
+    const entryMarkers = (result?.trades || []).map((trade) => {
       let tradeTime: number
       if (typeof trade.time === 'string') {
         tradeTime = Math.floor(new Date(trade.time).getTime() / 1000)
@@ -103,7 +103,7 @@ export const StrategyChart: React.FC<Props> = ({ ohlcvData, result }) => {
     })
 
     // Add exit markers
-    const exitMarkers = result.trades
+    const exitMarkers = (result?.trades || [])
       .filter((trade) => trade.exit_time)
       .map((trade) => {
         let exitTime: number
@@ -126,7 +126,9 @@ export const StrategyChart: React.FC<Props> = ({ ohlcvData, result }) => {
     // Sort all markers by time ascending
     const allMarkers = [...entryMarkers, ...exitMarkers].sort((a, b) => a.time - b.time)
 
-    candlestickSeries.setMarkers(allMarkers as any)
+    if (allMarkers.length > 0) {
+      candlestickSeries.setMarkers(allMarkers as any)
+    }
 
     // Handle resize
     const handleResize = () => {
