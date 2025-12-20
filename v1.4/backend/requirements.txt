@@ -16,6 +16,14 @@ yfinance>=0.2.0  # Yahoo Finance (supports some VN stocks with .VN suffix)
 pandas>=2.0.0  # Required by vnstock, stockvip, and yfinance
 requests>=2.31.0  # For web scraping (optional)
 
+# GPU Acceleration (Optional)
+# cupy-cuda12x>=12.0.0  # For CUDA 12.x GPUs (uncomment if you have NVIDIA GPU)
+# cupy-cuda11x>=11.0.0  # For CUDA 11.x GPUs (uncomment if you have NVIDIA GPU)
+# cupy-cuda10x>=10.0.0  # For CUDA 10.x GPUs (uncomment if you have NVIDIA GPU)
+# Note: Install appropriate cupy version based on your CUDA version
+# Check CUDA version: nvidia-smi
+# If no GPU, leave commented - will use CPU (NumPy)
+
 # Optional: For production
 # python-multipart==0.0.6  # For file uploads
 # email-validator==2.1.0   # For email validation

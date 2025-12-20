@@ -58,6 +58,11 @@ export interface Trade {
 
 export interface ComboResult {
   combo: string
+  combo_config?: Array<{
+    indicator_name: string
+    config: Record<string, any>
+    display_name: string
+  }>
   trades: number
   wins: number
   losses: number

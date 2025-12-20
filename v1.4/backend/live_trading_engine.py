@@ -50,15 +50,24 @@ class LiveTradingEngine:
             if strategy is None:
                 strategy = strategy_storage.load_strategy(config.strategy_name)
                 if not strategy:
-                    print(f"Strategy '{config.strategy_name}' not found")
+                    print(f"[Init] Strategy '{config.strategy_name}' not found")
                     return False
+                print(f"[Init] Loaded strategy '{strategy.name}' from storage")
                 self._current_strategy = None  # Will load from storage in update()
             else:
                 # Store strategy reference for later use
                 self._current_strategy = strategy
+                print(f"[Init] Using provided strategy '{strategy.name}'")
                 # Update strategy name in config for consistency
                 if not config.strategy_name or config.strategy_name == "":
                     config.strategy_name = strategy.name
+            
+            # Log strategy details for debugging
+            enabled_indicators = [ind for ind in strategy.indicators if ind.enabled]
+            print(f"[Init] Strategy '{strategy.name}': {len(enabled_indicators)}/{len(strategy.indicators)} indicators enabled")
+            print(f"[Init] Threshold: {strategy.signal_logic.threshold_percent}%, Candle confirmation: {strategy.signal_logic.candle_confirmation}")
+            if enabled_indicators:
+                print(f"[Init] Enabled indicators: {[ind.type for ind in enabled_indicators]}")
             
             # Create initial state
             self.state = LiveTradingState(
@@ -211,12 +220,21 @@ class LiveTradingEngine:
             # Use stored strategy or load from storage
             if self._current_strategy:
                 strategy = self._current_strategy
+                print(f"[Strategy] Using cached strategy: {strategy.name}")
             else:
                 strategy = strategy_storage.load_strategy(
                     self.state.config.strategy_name
                 )
                 if not strategy:
                     return {"error": f"Strategy '{self.state.config.strategy_name}' not found"}
+                print(f"[Strategy] Loaded strategy from storage: {strategy.name}")
+            
+            # Log strategy info for debugging
+            enabled_indicators = [ind for ind in strategy.indicators if ind.enabled]
+            print(f"[Strategy] Strategy '{strategy.name}' - Enabled indicators: {len(enabled_indicators)}/{len(strategy.indicators)}")
+            print(f"[Strategy] Threshold: {strategy.signal_logic.threshold_percent}%")
+            if enabled_indicators:
+                print(f"[Strategy] Indicator details: {[(ind.type, f'weight:{ind.weight}') for ind in enabled_indicators[:5]]}")
             
             # Calculate signals
             signals = self._get_signals(strategy, candles)
@@ -275,25 +293,35 @@ class LiveTradingEngine:
                 StrategyEngine.calculate_signal(strategy, data, index)
             )
             
+            # Debug logging
+            threshold = strategy.signal_logic.threshold_percent
+            enabled_indicators = [ind.type for ind in strategy.indicators if ind.enabled]
+            print(f"[Signal Calc] Direction: {direction}, Bullish: {bullish_pct:.1f}%, Bearish: {bearish_pct:.1f}%, Threshold: {threshold}%")
+            print(f"[Signal Calc] Enabled indicators: {enabled_indicators}")
+            if signals_detail:
+                print(f"[Signal Calc] Indicator signals: {[(s.indicator_type, f'B:{s.bullish}', f'Br:{s.bearish}') for s in signals_detail[:5]]}")
+            
             # Convert to signal type
-            if direction == "BULLISH":
+            # Note: StrategyEngine returns 'LONG', 'SHORT', or None
+            # Map to SignalType based on direction and percentages
+            if direction == "LONG":  # Fixed: was "BULLISH", should be "LONG"
                 if bullish_pct >= 80:
                     signal_type = SignalType.STRONG_BUY
                 else:
                     signal_type = SignalType.BUY
                 confidence = bullish_pct
-                print(f"[Signal] BULLISH: {bullish_pct:.1f}% bullish, {bearish_pct:.1f}% bearish -> {signal_type}")
-            elif direction == "BEARISH":
+                print(f"[Signal] LONG detected: {bullish_pct:.1f}% bullish -> {signal_type}")
+            elif direction == "SHORT":  # Fixed: was "BEARISH", should be "SHORT"
                 if bearish_pct >= 80:
                     signal_type = SignalType.STRONG_SELL
                 else:
                     signal_type = SignalType.SELL
                 confidence = bearish_pct
-                print(f"[Signal] BEARISH: {bullish_pct:.1f}% bullish, {bearish_pct:.1f}% bearish -> {signal_type}")
+                print(f"[Signal] SHORT detected: {bearish_pct:.1f}% bearish -> {signal_type}")
             else:
                 signal_type = SignalType.NEUTRAL
                 confidence = 50.0
-                print(f"[Signal] NEUTRAL: {bullish_pct:.1f}% bullish, {bearish_pct:.1f}% bearish (no direction)")
+                print(f"[Signal] NEUTRAL: {bullish_pct:.1f}% bullish, {bearish_pct:.1f}% bearish, threshold={threshold}% (direction={direction})")
             
             # Get reversal signals (check for divergence in signals_detail)
             reversal_strength = 0.0

@@ -21,13 +21,24 @@ export const ResultsTable: React.FC = () => {
   }
 
   const handleLoadToBuilder = (combo: ComboResult) => {
-    // Parse combo string to get indicators
-    const indicators = combo.combo.split(' + ').map(indName => ({
-      type: indName.trim(),
-      config: {},
-      weight: 1.0,
-      enabled: true
-    }))
+    // Use combo_config if available, otherwise parse from combo string
+    let indicators
+    if (combo.combo_config && combo.combo_config.length > 0) {
+      indicators = combo.combo_config.map(ind => ({
+        type: ind.indicator_name,
+        config: ind.config || {},
+        weight: 1.0,
+        enabled: true
+      }))
+    } else {
+      // Fallback: Parse combo string
+      indicators = combo.combo.split(' + ').map(indName => ({
+        type: indName.trim(),
+        config: {},
+        weight: 1.0,
+        enabled: true
+      }))
+    }
 
     // Save to localStorage for Strategy Builder to load
     localStorage.setItem('optimizedCombo', JSON.stringify({
@@ -35,7 +46,7 @@ export const ResultsTable: React.FC = () => {
       threshold: 70 // Default threshold
     }))
 
-    alert(`✅ Đã lưu combo "${combo.combo}"! Vào Strategy Builder để load và test chi tiết.`)
+    alert(`✅ Đã lưu combo "${combo.combo}" với config! Vào Strategy Builder để load và test chi tiết.`)
   }
 
   const handleGenerateScript = async (combo: ComboResult) => {
@@ -296,7 +307,28 @@ export const ResultsTable: React.FC = () => {
                   onClick={() => handleRowClick(result)}
                 >
                   <td className="p-4">{idx + 1}</td>
-                  <td className="p-4 font-mono text-secondary font-bold">{result.combo}</td>
+                  <td className="p-4">
+                    <div className="font-mono text-secondary font-bold">{result.combo}</div>
+                    {result.combo_config && result.combo_config.length > 0 && (
+                      <details className="mt-2 text-xs">
+                        <summary className="cursor-pointer text-blue-400 hover:text-blue-300">
+                          📋 Xem config chi tiết
+                        </summary>
+                        <div className="mt-2 pl-4 space-y-1 bg-gray-800/50 p-2 rounded">
+                          {result.combo_config.map((ind, i) => (
+                            <div key={i} className="text-gray-300">
+                              <span className="font-bold text-yellow-400">{ind.display_name}</span>
+                              {Object.keys(ind.config).length > 0 && (
+                                <span className="ml-2 text-gray-400">
+                                  ({Object.entries(ind.config).map(([k, v]) => `${k}=${v}`).join(', ')})
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                  </td>
                   <td className="p-4 text-center">{result.trades}</td>
                   <td className={`p-4 text-center font-bold ${result.win_rate >= 50 ? 'text-green-400' : 'text-red-400'}`}>
                     {result.win_rate}%

@@ -12,7 +12,8 @@ from .stochastic import StochasticIndicator
 from .bollinger import BollingerBandsIndicator
 from .adx import ADXIndicator
 
-# EMA Indicators
+# Moving Average Indicators
+from .sma import SMAIndicator, SMA50Indicator, SMA200Indicator
 from .ema import EMAIndicator, EMA50Indicator, EMA200Indicator, EMA12Indicator, EMA26Indicator
 
 # Momentum Indicators (each in separate file)
@@ -23,6 +24,7 @@ from .vroc import VROCIndicator
 from .rvi import RVIIndicator
 from .awesome_oscillator import AwesomeOscillatorIndicator
 from .momentum import MomentumIndicator
+from .williams_r import WilliamsRIndicator
 
 # Volatility Indicators (each in separate file)
 from .atr import ATRIndicator
@@ -42,8 +44,10 @@ from .fibonacci import FibonacciIndicator
 from .ichimoku import IchimokuIndicator
 from .candlestick_patterns import CandlestickPatternsIndicator
 from .ict_concepts import ICTConceptsIndicator
+from .parabolic_sar import ParabolicSARIndicator
+from .aroon import AroonIndicator
 
-# Registry of all available indicators (27 indicators)
+# Registry of all available indicators (31 indicators)
 INDICATOR_REGISTRY = {
     # Momentum Oscillators
     'RSI': RSIIndicator,
@@ -56,14 +60,20 @@ INDICATOR_REGISTRY = {
     'RVI': RVIIndicator,
     'Awesome_Oscillator': AwesomeOscillatorIndicator,
     'Momentum': MomentumIndicator,
+    'Williams_R': WilliamsRIndicator,
     
     # Trend Indicators
+    'SMA_50': SMA50Indicator,
+    'SMA_200': SMA200Indicator,
+    'SMA': SMAIndicator,
     'EMA_50': EMA50Indicator,
     'EMA_200': EMA200Indicator,
     'EMA_12': EMA12Indicator,
     'EMA_26': EMA26Indicator,
     'ADX': ADXIndicator,
     'SuperTrend': SuperTrendIndicator,
+    'Parabolic_SAR': ParabolicSARIndicator,
+    'Aroon': AroonIndicator,
     
     # Volatility Indicators
     'Bollinger_Bands': BollingerBandsIndicator,
@@ -172,6 +182,9 @@ __all__ = [
     # Individual indicators
     'RSIIndicator',
     'MACDIndicator',
+    'SMAIndicator',
+    'SMA50Indicator',
+    'SMA200Indicator',
     'EMAIndicator',
     'EMA50Indicator',
     'EMA200Indicator',
@@ -180,6 +193,9 @@ __all__ = [
     'StochasticIndicator',
     'BollingerBandsIndicator',
     'ADXIndicator',
+    'WilliamsRIndicator',
+    'ParabolicSARIndicator',
+    'AroonIndicator',
     'TripleEMAIndicator',
     'FibonacciIndicator',
     'IchimokuIndicator',

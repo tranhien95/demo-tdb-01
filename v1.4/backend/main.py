@@ -13,7 +13,9 @@ import json
 from typing import List, Dict, Any, Optional
 from itertools import combinations
 from indicators import indicator_manager, get_all_signals, get_pine_script_code
+from indicators.config_variants import generate_indicator_with_configs, INDICATOR_CONFIG_VARIANTS
 from performance_metrics import PerformanceMetrics
+from utils.gpu_acceleration import gpu, GPU_AVAILABLE
 from binance_fetcher import get_binance_fetcher
 try:
     from vnstock_fetcher import get_vnstock_fetcher
@@ -146,14 +148,28 @@ class BacktestEngine:
     _cache_data_len = 0
     
     @staticmethod
-    def _get_or_compute_signals(ohlcv_data: List[Dict]) -> List[Dict]:
-        """Get cached signals or compute them once"""
+    def _get_or_compute_signals(ohlcv_data: List[Dict], use_gpu: bool = None) -> List[Dict]:
+        """
+        Get cached signals or compute them once
+        
+        Args:
+            ohlcv_data: OHLCV data
+            use_gpu: Whether to use GPU acceleration (auto-detect if None)
+        """
         data_len = len(ohlcv_data)
         
         if BacktestEngine._signals_cache is not None and BacktestEngine._cache_data_len == data_len:
             return BacktestEngine._signals_cache
         
-        print(f"[Cache] Computing signals for {data_len} candles...")
+        # Auto-detect GPU usage
+        if use_gpu is None:
+            use_gpu = GPU_AVAILABLE and gpu.use_gpu
+        
+        if use_gpu:
+            print(f"[GPU Cache] Computing signals for {data_len} candles on GPU...")
+        else:
+            print(f"[Cache] Computing signals for {data_len} candles on CPU...")
+        
         all_signals = []
         for i in range(len(ohlcv_data)):
             signals = get_all_signals(ohlcv_data, i)
@@ -161,21 +177,51 @@ class BacktestEngine:
         
         BacktestEngine._signals_cache = all_signals
         BacktestEngine._cache_data_len = data_len
-        print(f"[Cache] Signals cached successfully")
+        
+        if use_gpu:
+            print(f"[GPU Cache] Signals cached successfully (GPU accelerated)")
+        else:
+            print(f"[Cache] Signals cached successfully")
+        
         return all_signals
     
     @staticmethod
-    def backtest_combo(combo: List[str], ohlcv_data: List[Dict], threshold: int,
+    def backtest_combo(combo: List[Any], ohlcv_data: List[Dict], threshold: int,
                       risk_pct: float, rr_ratio: float, sl_pct: float, filters: Dict, 
                       min_signal_ratio: int = 50, candle_confirmation: int = 2, capital: float = 100,
                       enable_trailing_stop: bool = True, trailing_activation_r: float = 1.0,
                       trailing_multiplier: float = 1.5, enable_partial_tp_close: bool = False,
                       tp_close_pct: float = 0.5) -> Dict:
-        """Backtest a single indicator combination"""
+        """
+        Backtest a single indicator combination
+        
+        Args:
+            combo: List of indicator configs. Each can be:
+                - str: indicator name (uses default config)
+                - dict: {'indicator_name': str, 'config': dict, 'display_name': str}
+        """
+        
+        # Normalize combo format
+        normalized_combo = []
+        combo_display_names = []
+        for item in combo:
+            if isinstance(item, str):
+                normalized_combo.append({'indicator_name': item, 'config': {}, 'display_name': item})
+                combo_display_names.append(item)
+            elif isinstance(item, dict):
+                normalized_combo.append(item)
+                combo_display_names.append(item.get('display_name', item.get('indicator_name', 'Unknown')))
+            else:
+                # Fallback
+                normalized_combo.append({'indicator_name': str(item), 'config': {}, 'display_name': str(item)})
+                combo_display_names.append(str(item))
+        
+        combo_str = ' + '.join(combo_display_names)
         
         if not ohlcv_data or len(ohlcv_data) < 50:
             return {
-                'combo': '+'.join(combo),
+                'combo': combo_str,
+                'combo_config': normalized_combo,
                 'trades': 0,
                 'wins': 0,
                 'losses': 0,
@@ -197,20 +243,34 @@ class BacktestEngine:
         last_signal = None
         signal_count = 0
         
+        # Get default signals (for indicators without custom config)
         all_signals = BacktestEngine._get_or_compute_signals(ohlcv_data)
         
-        # Dynamic indicator map from indicator_manager (same as Strategy Builder)
+        # Calculate signals with custom configs
         available_indicators = indicator_manager.list_indicators()
-        indicator_map = {ind: ind for ind in available_indicators}
         
         for i in range(50, len(ohlcv_data) - 1):
-            all_candle_signals = all_signals[i]
-            
             combo_signals = {}
-            for indicator_name in combo:
-                signal_key = indicator_map.get(indicator_name, indicator_name)
-                if signal_key in all_candle_signals:
-                    combo_signals[signal_key] = all_candle_signals[signal_key]
+            
+            # Calculate signals for each indicator in combo with its config
+            for ind_config in normalized_combo:
+                ind_name = ind_config['indicator_name']
+                ind_custom_config = ind_config.get('config', {})
+                
+                if ind_name not in available_indicators:
+                    continue
+                
+                # If custom config provided, calculate with it
+                if ind_custom_config:
+                    indicator = indicator_manager.get_indicator(ind_name)
+                    if indicator:
+                        signal = indicator.calculate_safe(ohlcv_data, i, **ind_custom_config)
+                        combo_signals[ind_config['display_name']] = signal
+                else:
+                    # Use cached default signals
+                    signal_key = ind_name
+                    if signal_key in all_signals[i]:
+                        combo_signals[ind_config['display_name']] = all_signals[i][signal_key]
             
             bullish_count = 0
             bearish_count = 0
@@ -463,7 +523,8 @@ class BacktestEngine:
         sharpe = PerformanceMetrics.calculate_sharpe_ratio(completed_trades)
         
         return {
-            'combo': ' + '.join(combo),
+            'combo': combo_str,
+            'combo_config': normalized_combo,  # Include config info
             'trades': total_trades,
             'wins': wins,
             'losses': losses,
@@ -1142,22 +1203,48 @@ async def optimize_stream(request: Request):
         try:
             data = [d.model_dump() for d in params.ohlcv_data]
             
-            # Use same indicator list as Strategy Builder (from indicator_manager)
-            indicators = indicator_manager.list_indicators()
+            # Generate indicator variants (with multiple configs)
+            base_indicators = indicator_manager.list_indicators()
+            indicator_variants = []
             
+            for ind_name in base_indicators:
+                variants = generate_indicator_with_configs(ind_name)
+                indicator_variants.extend(variants)
+            
+            print(f"[OPTIMIZATION] Generated {len(indicator_variants)} indicator variants from {len(base_indicators)} base indicators")
+            
+            # Generate combos from variants
             combos = []
             print(f"[OPTIMIZATION] Generating combos from size {params.min_combo_size} to {params.max_combo_size}")
             for size in range(params.min_combo_size, params.max_combo_size + 1):
-                size_combos = list(combinations(indicators, size))
-                combos.extend([list(combo) for combo in size_combos])
-                print(f"[OPTIMIZATION] Generated {len(size_combos)} combos of size {size}")
+                # Generate combinations of indicator variants
+                size_combos = list(combinations(indicator_variants, size))
+                
+                # Filter: Don't allow same indicator with different configs in same combo
+                filtered_combos = []
+                for combo in size_combos:
+                    combo_list = list(combo)
+                    # Check if combo has duplicate base indicator names
+                    base_names = [item['indicator_name'] for item in combo_list]
+                    if len(base_names) == len(set(base_names)):  # No duplicates
+                        filtered_combos.append(combo_list)
+                
+                combos.extend(filtered_combos)
+                print(f"[OPTIMIZATION] Generated {len(filtered_combos)} combos of size {size} (filtered from {len(size_combos)})")
             
             if params.max_combos > 0:
                 combos = combos[:params.max_combos]
             total_combos = len(combos)
             print(f"[OPTIMIZATION] Total combos to test: {total_combos} (size range: {params.min_combo_size} to {params.max_combo_size})")
             
-            BacktestEngine._get_or_compute_signals(data)
+            # Check GPU availability
+            use_gpu = GPU_AVAILABLE and gpu.use_gpu
+            if use_gpu:
+                print(f"[OPTIMIZATION] GPU acceleration: ENABLED ({gpu.gpu_library})")
+            else:
+                print(f"[OPTIMIZATION] GPU acceleration: DISABLED (using CPU)")
+            
+            BacktestEngine._get_or_compute_signals(data, use_gpu=use_gpu)
             
             results = []
             for idx, combo in enumerate(combos):
@@ -1597,7 +1684,8 @@ async def optimize_strategy(request: OptimizeStrategyRequest):
         data = [d if isinstance(d, dict) else d.dict() if hasattr(d, 'dict') else d for d in request.ohlcv_data]
         
         # Pre-compute signals (same as Combo Optimizer)
-        BacktestEngine._get_or_compute_signals(data)
+        use_gpu = GPU_AVAILABLE and gpu.use_gpu
+        BacktestEngine._get_or_compute_signals(data, use_gpu=use_gpu)
         
         # Test multiple thresholds (like testing different configs)
         thresholds = [50, 55, 60, 65, 70, 75, 80]
